@@ -1,0 +1,51 @@
+# Rust build artifacts
+/target/
+/core/target/
+**/*.rs.bk
+*.pdb
+
+# Cargo lock file (optional - include for applications, exclude for libraries)
+# For this CLI application, we should include it
+# Cargo.lock
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Debug and profiling
+*.prof
+*.flamegraph
+perf.data
+perf.data.old
+
+# Test coverage
+*.profraw
+*.profdata
+coverage/
+tarpaulin-report.html
+
+# mise/rtx local configuration
+.mise.local.toml
+.rtx.toml
+
+# Environment files
+.env
+.env.local
+
+# OS specific files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+
+# Binary releases
+/dist/
+/releases/
