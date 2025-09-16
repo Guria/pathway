@@ -1,36 +1,47 @@
 # Add 'rust' label to any change in the core directory
 rust:
-  - core/**/*
+  - changed-files:
+    - any-glob-to-any-file: core/**/*
 
 # Add 'documentation' label to any change to documentation files
 documentation:
-  - README.md
-  - LICENSE*
-  - docs/**/*
-  - "**/*.md"
+  - changed-files:
+    - any-glob-to-any-file: 
+      - README.md
+      - LICENSE*
+      - docs/**/*
+      - "**/*.md"
 
 # Add 'ci' label to any CI/CD related changes
 ci:
-  - .github/workflows/*
-  - .github/actions/*
-  - .github/dependabot.yml
+  - changed-files:
+    - any-glob-to-any-file:
+      - .github/workflows/*
+      - .github/actions/*
+      - .github/dependabot.yml
 
 # Add 'tests' label to any test file changes
 tests:
-  - core/tests/**/*
-  - "**/*_test.rs"
-  - "**/test_*.rs"
+  - changed-files:
+    - any-glob-to-any-file:
+      - core/tests/**/*
+      - "**/*_test.rs"
+      - "**/test_*.rs"
 
 # Add 'dependencies' label to any dependency file changes
 dependencies:
-  - core/Cargo.toml
-  - core/Cargo.lock
+  - changed-files:
+    - any-glob-to-any-file:
+      - core/Cargo.toml
+      - core/Cargo.lock
 
 # Add 'config' label to configuration file changes
 config:
-  - .github/**/*.yml
-  - .github/**/*.yaml
-  - deny.toml
-  - rust-toolchain.toml
-  - .rustfmt.toml
-  - .clippy.toml
+  - changed-files:
+    - any-glob-to-any-file:
+      - .github/**/*.yml
+      - .github/**/*.yaml
+      - deny.toml
+      - rust-toolchain.toml
+      - .rustfmt.toml
+      - .clippy.toml
