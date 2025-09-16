@@ -40,7 +40,8 @@ jobs:
           gh release create "${{ steps.get_version.outputs.version }}" \
             --title "Release ${{ steps.get_version.outputs.version }}" \
             --generate-notes \
-            --latest
+            --latest \
+            --verify-tag
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
