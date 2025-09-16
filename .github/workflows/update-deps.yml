@@ -1,0 +1,57 @@
+name: Update Dependencies
+
+on:
+  schedule:
+    # Run every Monday at 3:00 UTC
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
+
+jobs:
+  update:
+    name: Update Cargo dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-edit
+        run: cargo install cargo-edit
+
+      - name: Update dependencies
+        working-directory: ./core
+        run: |
+          cargo update
+          cargo upgrade --compatible
+
+      - name: Run tests
+        working-directory: ./core
+        run: cargo test
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "chore(deps): update cargo dependencies"
+          title: "chore(deps): Weekly cargo dependency updates"
+          body: |
+            ## Automated Dependency Updates
+            
+            This PR contains the latest compatible updates for all cargo dependencies.
+            
+            ### What changed
+            - Updated Cargo.lock with latest compatible versions
+            - All dependencies upgraded to latest compatible versions
+            
+            ### Testing
+            - ✅ All tests pass with updated dependencies
+            
+            Please review the changes and merge if all CI checks pass.
+          branch: deps/cargo-update
+          delete-branch: true
+          labels: |
+            dependencies
+            rust
+            automated-pr
