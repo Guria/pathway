@@ -79,6 +79,9 @@ jobs:
   coverage:
     name: Code Coverage
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     steps:
       - name: Checkout sources
@@ -95,9 +98,9 @@ jobs:
         run: cargo tarpaulin --out xml --all-features
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v3
+        uses: codecov/codecov-action@v4
         with:
-          token: ${{ secrets.CODECOV_TOKEN }}
+          use_oidc: true
           files: ./core/cobertura.xml
           fail_ci_if_error: false
 

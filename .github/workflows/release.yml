@@ -36,14 +36,13 @@ jobs:
           fi
 
       - name: Create Release
-        run: |
-          gh release create "${{ steps.get_version.outputs.version }}" \
-            --title "Release ${{ steps.get_version.outputs.version }}" \
-            --generate-notes \
-            --latest \
-            --verify-tag
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.get_version.outputs.version }}
+          name: Release ${{ steps.get_version.outputs.version }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
 
   build-release:
     name: Build Release
@@ -88,6 +87,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.create-release.outputs.version }}
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
