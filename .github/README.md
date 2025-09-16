@@ -59,13 +59,13 @@ This directory contains comprehensive GitHub Actions workflows for the Pathway p
 - `cargo test --release --verbose` - All tests pass in release mode
 - `cargo doc --no-deps --document-private-items --all-features` - Documentation builds
 
-### ⚠️ Requires Rust Update (edition2024):
-The following tools require a newer version of Rust with edition2024 support:
+### ✅ Additional Tools:
+These tools are compatible with stable Rust toolchains and provide extended functionality:
 - `cargo-machete` - For checking unused dependencies
-- `cargo-deny` - For license and security checks
+- `cargo-deny` - For license and security checks  
 - `cargo-audit` - For security vulnerability scanning
 
-To use these tools, update to Rust nightly or wait for edition2024 stabilization.
+All tools work with recent stable Rust versions (1.70+).
 
 ## Setup Requirements
 

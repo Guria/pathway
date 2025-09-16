@@ -136,13 +136,14 @@ fn auto_detect_scheme(input: &str) -> Result<String> {
 }
 
 fn contains_path_traversal(path: &str) -> bool {
-    // Check for various path traversal patterns
-    path.contains("../")
-        || path.contains("..\\")
-        || path.contains("....")
-        || path.contains("%2e%2e")
-        || path.contains("%2e%2e%2f")
-        || path.contains("%2e%2e%5c")
+    // Normalize to ASCII lowercase to match percent-encodings regardless of case.
+    let p = path.to_ascii_lowercase();
+    p.contains("../")
+        || p.contains("..\\")
+        || p.contains("....")
+        || p.contains("%2e%2e")
+        || p.contains("%2e%2e%2f")
+        || p.contains("%2e%2e%5c")
 }
 
 #[cfg(test)]
@@ -174,5 +175,8 @@ mod tests {
     fn test_path_traversal() {
         assert!(validate_url("file:///../etc/passwd").is_err());
         assert!(validate_url("file:///tmp/../../../etc/passwd").is_err());
+        // Test case-insensitive percent-encoding detection
+        assert!(validate_url("file:///%2E%2E/etc/passwd").is_err());
+        assert!(validate_url("file:///%2E%2E%2F../etc/passwd").is_err());
     }
 }

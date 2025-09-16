@@ -44,7 +44,7 @@ jobs:
       - name: Cache cargo build
         uses: actions/cache@v4
         with:
-          path: target
+          path: core/target
           key: ${{ runner.os }}-cargo-bench-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Run benchmarks
