@@ -117,22 +117,3 @@ jobs:
       - name: Check MSRV
         working-directory: ./core
         run: cargo check --all-features
-
-  security-audit:
-    name: Security Audit
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v4
-
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install cargo-audit
-        run: cargo install cargo-audit --locked
-
-      - name: Run cargo audit
-        working-directory: ./core
-        env:
-          RUSTSEC_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: cargo audit

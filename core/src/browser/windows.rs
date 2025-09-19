@@ -32,12 +32,71 @@ pub fn detect_browsers() -> Vec<BrowserInfo> {
     result
 }
 
+/// Returns the system default browser on Windows, if available.
+///
+/// Currently unimplemented on Windows — this function always returns `None`.
+///
+/// # Examples
+///
+/// ```
+/// use pathway::detect_inventory;
+///
+/// let inventory = detect_inventory();
+/// let sys = &inventory.system_default;
+/// // On Windows, system default detection is not yet implemented
+/// // so this will be a fallback entry
+/// println!("Default browser: {}", sys.display_name);
+/// ```
 pub fn system_default_browser() -> Option<SystemDefaultBrowser> {
     // TODO: Implement Windows system default browser detection via registry queries
     None
 }
 
+/// Launches the given URLs using the specified target (a specific browser or the system default).
+///
+/// This is a convenience wrapper that calls `launch_with_profile` without any profile or window options.
+/// Returns `Err(LaunchError::NoUrls)` if `urls` is empty. Other error variants may be returned if an
+/// executable cannot be resolved or the process spawn fails.
+///
+/// # Examples
+///
+/// ```no_run
+/// use pathway::{launch, LaunchTarget};
+///
+/// let urls = vec!["https://example.com".to_string()];
+/// let _ = launch(LaunchTarget::SystemDefault, &urls);
+/// ```
 pub fn launch(target: LaunchTarget<'_>, urls: &[String]) -> Result<LaunchOutcome, LaunchError> {
+    launch_with_profile(target, urls, None, None)
+}
+
+/// Launches the given URLs either in a specific browser or via the system default, optionally applying profile/window options.
+///
+/// When `target` is `LaunchTarget::Browser(info)`, this spawns the browser executable returned by `info.launch_path()`,
+/// appending generated profile arguments if both `profile_opts` and `window_opts` are provided, then appending the URLs.
+/// When `target` is `LaunchTarget::SystemDefault`, each URL is launched via `rundll32 url.dll,FileProtocolHandler`.
+///
+/// Errors:
+/// - `LaunchError::NoUrls` if `urls` is empty.
+/// - `LaunchError::MissingExecutable(_)` if a requested browser has no executable path.
+/// - `LaunchError::Spawn { source: io::Error }` if spawning a process fails.
+///
+/// # Examples
+///
+/// ```no_run
+/// use pathway::{launch_with_profile, LaunchTarget};
+///
+/// let urls = vec!["https://example.com".to_string()];
+/// // Launch using the system default handler (no profile/window options)
+/// let outcome = launch_with_profile(LaunchTarget::SystemDefault, &urls, None, None).unwrap();
+/// println!("Launched: {}", outcome.command.display);
+/// ```
+pub fn launch_with_profile(
+    target: LaunchTarget<'_>,
+    urls: &[String],
+    profile_opts: Option<&crate::profile::ProfileOptions>,
+    window_opts: Option<&crate::profile::WindowOptions>,
+) -> Result<LaunchOutcome, LaunchError> {
     if urls.is_empty() {
         return Err(LaunchError::NoUrls);
     }
@@ -49,17 +108,47 @@ pub fn launch(target: LaunchTarget<'_>, urls: &[String]) -> Result<LaunchOutcome
                 .ok_or_else(|| LaunchError::MissingExecutable(info.display_name.clone()))?;
 
             let mut command = Command::new(exec);
+
+            let has_profile_args =
+                if let (Some(profile_opts), Some(window_opts)) = (profile_opts, window_opts) {
+                    let profile_args = crate::profile::ProfileManager::generate_profile_args(
+                        info,
+                        profile_opts,
+                        window_opts,
+                    );
+                    command.args(&profile_args);
+                    !profile_args.is_empty()
+                } else {
+                    false
+                };
+
             command.args(urls);
             command.stdin(Stdio::null());
             command.stdout(Stdio::null());
             command.stderr(Stdio::null());
-            debug!(program = %exec.display(), args = ?urls, "Launching browser");
+
+            let all_args: Vec<String> = command
+                .get_args()
+                .map(|s| s.to_string_lossy().to_string())
+                .collect();
+            let log_message = if has_profile_args {
+                "Launching browser with profile"
+            } else {
+                "Launching browser"
+            };
+            debug!(program = %exec.display(), args = ?all_args, "{}", log_message);
             command.spawn()?;
+
+            // Apply Windows-specific argument quoting for display purposes
+            // Windows command-line parsing rules: arguments containing spaces, tabs, or quotes
+            // must be wrapped in double quotes, with internal quotes and backslashes escaped
+            let quoted_args: Vec<String> =
+                all_args.iter().map(|arg| quote_windows_arg(arg)).collect();
 
             let cmd = LaunchCommand {
                 program: exec.to_path_buf(),
-                args: urls.to_vec(),
-                display: format!("{} {}", exec.display(), urls.join(" ")),
+                args: all_args.clone(),
+                display: format!("{} {}", exec.display(), quoted_args.join(" ")),
                 is_system_default: false,
             };
 
@@ -80,10 +169,25 @@ pub fn launch(target: LaunchTarget<'_>, urls: &[String]) -> Result<LaunchOutcome
                 command.spawn()?;
             }
 
+            // Create LaunchCommand that accurately represents multiple rundll32 invocations
+            // Since we spawn one command per URL, represent this as multiple command invocations
+            let individual_commands: Vec<String> = urls
+                .iter()
+                .map(|url| {
+                    format!(
+                        "rundll32 url.dll,FileProtocolHandler {}",
+                        quote_windows_arg(url)
+                    )
+                })
+                .collect();
+
             let cmd = LaunchCommand {
                 program: PathBuf::from("rundll32"),
-                args: urls.to_vec(),
-                display: format!("rundll32 url.dll,FileProtocolHandler {}", urls.join(" ")),
+                args: vec!["url.dll,FileProtocolHandler".to_string()]
+                    .into_iter()
+                    .chain(urls.iter().cloned())
+                    .collect(),
+                display: individual_commands.join(" && "), // Show multiple invocations with && separator
                 is_system_default: true,
             };
 
@@ -313,4 +417,142 @@ fn windows_base_dirs() -> Vec<PathBuf> {
         dirs.push(PathBuf::from(path));
     }
     dirs
+}
+
+/// Quote a command-line argument for Windows according to Microsoft's documented rules.
+///
+/// Windows command-line argument parsing rules (used by CommandLineToArgvW):
+/// - Arguments containing spaces, tabs, or double quotes must be wrapped in double quotes
+/// - Backslashes that precede a double quote must be escaped by doubling them
+/// - Double quotes within arguments must be escaped with a backslash
+/// - Trailing backslashes before the closing quote must be doubled
+/// - When an argument contains quotes, all backslashes are doubled to prevent misinterpretation
+///
+/// Reference: https://docs.microsoft.com/en-us/windows/win32/api/shellapi/nf-shellapi-commandlinetoargvw
+///
+/// This function implements Windows command-line argument quoting rules:
+/// - Simple arguments without special characters are returned unchanged
+/// - Arguments containing spaces, tabs, or quotes are wrapped in double quotes
+/// - Internal quotes are escaped as `\"`
+/// - Backslashes before quotes are doubled to prevent misinterpretation
+/// - Trailing backslashes before the closing quote are doubled
+fn quote_windows_arg(arg: &str) -> String {
+    // Check if quoting is needed (contains space, tab, or quote)
+    let needs_quoting = arg.is_empty() || arg.chars().any(|c| c == ' ' || c == '\t' || c == '"');
+
+    if !needs_quoting {
+        return arg.to_string();
+    }
+
+    let mut result = String::with_capacity(arg.len() + 2);
+    result.push('"');
+
+    let mut i = 0;
+    let chars: Vec<char> = arg.chars().collect();
+
+    while i < chars.len() {
+        match chars[i] {
+            '"' => {
+                // Escape quote with backslash
+                result.push('\\');
+                result.push('"');
+                i += 1;
+            }
+            '\\' => {
+                // Count consecutive backslashes
+                let mut backslash_count = 0;
+                while i < chars.len() && chars[i] == '\\' {
+                    backslash_count += 1;
+                    i += 1;
+                }
+
+                // Check what follows the backslashes
+                let followed_by_quote = i < chars.len() && chars[i] == '"';
+                let at_end = i >= chars.len();
+
+                // If followed by quote or at end, double the backslashes
+                if followed_by_quote || at_end {
+                    for _ in 0..(backslash_count * 2) {
+                        result.push('\\');
+                    }
+                } else {
+                    // If the string contains quotes (which means we need special escaping),
+                    // double all backslashes to prevent them from being interpreted as escapes
+                    let contains_quotes = arg.contains('"');
+                    if contains_quotes {
+                        for _ in 0..(backslash_count * 2) {
+                            result.push('\\');
+                        }
+                    } else {
+                        // Not followed by quote and no quotes in string, keep backslashes as-is
+                        for _ in 0..backslash_count {
+                            result.push('\\');
+                        }
+                    }
+                }
+            }
+            _ => {
+                result.push(chars[i]);
+                i += 1;
+            }
+        }
+    }
+
+    result.push('"');
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::quote_windows_arg;
+
+    #[test]
+    fn test_quote_windows_arg() {
+        // Simple arguments don't need quoting
+        assert_eq!(quote_windows_arg("simple"), "simple");
+        assert_eq!(quote_windows_arg("path/to/file"), "path/to/file");
+
+        // Arguments with spaces need quoting
+        assert_eq!(quote_windows_arg("has space"), "\"has space\"");
+        assert_eq!(
+            quote_windows_arg("multiple  spaces"),
+            "\"multiple  spaces\""
+        );
+
+        // Arguments with quotes need escaping
+        assert_eq!(quote_windows_arg("has\"quote"), "\"has\\\"quote\"");
+        assert_eq!(
+            quote_windows_arg("multiple\"quotes\"here"),
+            "\"multiple\\\"quotes\\\"here\""
+        );
+
+        // Backslashes before quotes need doubling
+        assert_eq!(
+            quote_windows_arg("path\\with\"quote"),
+            "\"path\\\\with\\\"quote\""
+        );
+
+        // Regular backslashes don't need escaping unless before quotes or end
+        assert_eq!(
+            quote_windows_arg("path\\with\\backslash"),
+            "path\\with\\backslash"
+        );
+        assert_eq!(
+            quote_windows_arg("path\\with space"),
+            "\"path\\with space\""
+        );
+
+        // Empty string needs quoting
+        assert_eq!(quote_windows_arg(""), "\"\"");
+
+        // URL examples (common use case)
+        assert_eq!(
+            quote_windows_arg("https://example.com"),
+            "https://example.com"
+        );
+        assert_eq!(
+            quote_windows_arg("https://example.com/path with spaces"),
+            "\"https://example.com/path with spaces\""
+        );
+    }
 }

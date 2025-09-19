@@ -35,6 +35,25 @@ pub fn detect_browsers() -> Vec<BrowserInfo> {
     result
 }
 
+/// Returns information about the system's default browser for the `https` scheme, if one is registered.
+///
+/// If the LaunchServices defaults include a handler bundle identifier for `https` and that bundle ID
+/// matches a known macOS browser candidate, this returns a `SystemDefaultBrowser` populated with
+/// the bundle identifier, the candidate's display name, kind, channel, and a resolved bundle path
+/// when the app bundle can be found on disk. If the bundle ID is present but does not match any
+/// known candidate, the returned `SystemDefaultBrowser` will contain the bundle identifier and a
+/// generic `"System default"` display name with `None` for kind, channel, and path. Returns `None`
+/// when no default handler for the `https` scheme is found.
+///
+/// # Examples
+///
+/// ```no_run
+/// // Example: get system default browser  
+/// // This function is typically called internally by the browser detection system
+/// // if let Some(sys) = system_default_browser() {
+/// //     println!("Default browser bundle id: {}", sys.identifier);
+/// // }
+/// ```
 pub fn system_default_browser() -> Option<SystemDefaultBrowser> {
     if let Some(bundle_id) = default_handler_for_scheme("https") {
         if let Some(candidate) = mac_candidates()
@@ -70,51 +89,184 @@ pub fn system_default_browser() -> Option<SystemDefaultBrowser> {
     None
 }
 
+/// Launch the specified browser (or the system default) with the given URLs.
+///
+/// This is a convenience wrapper around `launch_with_profile` that does not pass any
+/// profile or window options.
+///
+/// Returns a `LaunchOutcome` on success or a `LaunchError` on failure (for example
+/// when no URLs are provided, an executable is missing, or the spawn fails).
+///
+/// # Examples
+///
+/// ```no_run
+/// use pathway::{launch, LaunchTarget};
+///
+/// // Example: basic browser launch
+/// // let urls = vec!["https://example.com".to_string()];
+/// // let outcome = launch(LaunchTarget::SystemDefault, &urls);
+/// ```
 pub fn launch(target: LaunchTarget<'_>, urls: &[String]) -> Result<LaunchOutcome, LaunchError> {
+    launch_with_profile(target, urls, None, None)
+}
+
+/// Launches a URL list in a specified browser or the system default, optionally using profile and window options.
+///
+/// This function accepts either a specific browser (LaunchTarget::Browser) or the system default
+/// (LaunchTarget::SystemDefault). Behavior:
+/// - Browser (Safari): uses the macOS `open -b com.apple.Safari` command and respects `window_opts.new_window`.
+/// - Browser (non‑Safari): invokes the browser's executable found via `BrowserInfo::launch_path()`. If both
+///   `profile_opts` and `window_opts` are provided, profile-specific arguments are generated and prepended
+///   before the URLs.
+/// - SystemDefault: uses `open` to open URLs with the current system default browser and respects `window_opts`.
+///
+/// Errors:
+/// - Returns `LaunchError::NoUrls` if `urls` is empty.
+/// - Returns `LaunchError::MissingExecutable` if a non‑Safari browser is requested but no executable is found.
+/// - Returns `LaunchError::Spawn { source: io::Error }` if spawning the `open` or browser process fails.
+///
+/// Parameters:
+/// - `target`: which browser to launch (specific browser or system default).
+/// - `urls`: non-empty slice of URL strings to open.
+/// - `profile_opts`: optional profile configuration; used only for non‑Safari browsers when paired with `window_opts`.
+/// - `window_opts`: optional window behavior (e.g., request a new window).
+///
+/// Returns:
+/// - `Ok(LaunchOutcome)` on success containing the launched browser info (if any), detected system default (if used),
+///   and the exact `LaunchCommand` used to invoke the process.
+///
+/// # Examples
+///
+/// ```no_run
+/// use pathway::{launch_with_profile, LaunchTarget};
+///
+/// // Example: launch with profile options
+/// // let urls = vec!["https://example.com".to_string()];
+/// // let outcome = launch_with_profile(LaunchTarget::SystemDefault, &urls, None, None);
+/// ```
+pub fn launch_with_profile(
+    target: LaunchTarget<'_>,
+    urls: &[String],
+    profile_opts: Option<&crate::profile::ProfileOptions>,
+    window_opts: Option<&crate::profile::WindowOptions>,
+) -> Result<LaunchOutcome, LaunchError> {
     if urls.is_empty() {
         return Err(LaunchError::NoUrls);
     }
 
     match target {
         LaunchTarget::Browser(info) => {
-            let exec = info
-                .launch_path()
-                .ok_or_else(|| LaunchError::MissingExecutable(info.display_name.clone()))?;
+            if info.kind == crate::browser::BrowserKind::Safari {
+                let mut command = Command::new("open");
+                command.arg("-b").arg("com.apple.Safari");
 
-            let mut command = Command::new(exec);
-            command.args(urls);
-            command.stdin(Stdio::null());
-            command.stdout(Stdio::null());
-            command.stderr(Stdio::null());
-            debug!(program = %exec.display(), args = ?urls, "Launching browser");
-            command.spawn()?;
+                if let Some(window_opts) = window_opts {
+                    if window_opts.new_window {
+                        command.arg("--new");
+                    }
+                }
 
-            let cmd = LaunchCommand {
-                program: exec.to_path_buf(),
-                args: urls.to_vec(),
-                display: format!("{} {}", exec.display(), urls.join(" ")),
-                is_system_default: false,
-            };
+                command.args(urls);
+                command.stdin(Stdio::null());
+                command.stdout(Stdio::null());
+                command.stderr(Stdio::null());
 
-            Ok(LaunchOutcome {
-                browser: Some(info.clone()),
-                system_default: None,
-                command: cmd,
-            })
+                let all_args: Vec<String> = command
+                    .get_args()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .collect();
+                debug!(program = "open", args = ?all_args, "Launching Safari via open command");
+                command.spawn()?;
+
+                let cmd = LaunchCommand {
+                    program: PathBuf::from("open"),
+                    args: all_args.clone(),
+                    display: format!("open {}", all_args.join(" ")),
+                    is_system_default: false,
+                };
+
+                Ok(LaunchOutcome {
+                    browser: Some(info.clone()),
+                    system_default: None,
+                    command: cmd,
+                })
+            } else {
+                let exec = info
+                    .launch_path()
+                    .ok_or_else(|| LaunchError::MissingExecutable(info.display_name.clone()))?;
+
+                let mut command = Command::new(exec);
+
+                let has_profile_args =
+                    if let (Some(profile_opts), Some(window_opts)) = (profile_opts, window_opts) {
+                        let profile_args = crate::profile::ProfileManager::generate_profile_args(
+                            info,
+                            profile_opts,
+                            window_opts,
+                        );
+                        command.args(&profile_args);
+                        !profile_args.is_empty()
+                    } else {
+                        false
+                    };
+
+                command.args(urls);
+                command.stdin(Stdio::null());
+                command.stdout(Stdio::null());
+                command.stderr(Stdio::null());
+
+                let all_args: Vec<String> = command
+                    .get_args()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .collect();
+
+                let log_message = if has_profile_args {
+                    "Launching browser with profile"
+                } else {
+                    "Launching browser"
+                };
+                debug!(program = %exec.display(), args = ?all_args, "{}", log_message);
+                command.spawn()?;
+
+                let cmd = LaunchCommand {
+                    program: exec.to_path_buf(),
+                    args: all_args.clone(),
+                    display: format!("{} {}", exec.display(), all_args.join(" ")),
+                    is_system_default: false,
+                };
+
+                Ok(LaunchOutcome {
+                    browser: Some(info.clone()),
+                    system_default: None,
+                    command: cmd,
+                })
+            }
         }
         LaunchTarget::SystemDefault => {
             let mut command = Command::new("open");
+
+            if let Some(window_opts) = window_opts {
+                if window_opts.new_window {
+                    command.arg("--new");
+                }
+            }
+
             command.args(urls);
             command.stdin(Stdio::null());
             command.stdout(Stdio::null());
             command.stderr(Stdio::null());
-            debug!(program = "open", args = ?urls, "Launching system default browser");
+
+            let all_args: Vec<String> = command
+                .get_args()
+                .map(|s| s.to_string_lossy().to_string())
+                .collect();
+            debug!(program = "open", args = ?all_args, "Launching system default browser");
             command.spawn()?;
 
             let cmd = LaunchCommand {
                 program: PathBuf::from("open"),
-                args: urls.to_vec(),
-                display: format!("open {}", urls.join(" ")),
+                args: all_args.clone(),
+                display: format!("open {}", all_args.join(" ")),
                 is_system_default: true,
             };
 

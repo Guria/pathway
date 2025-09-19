@@ -35,6 +35,25 @@ pub fn detect_browsers() -> Vec<BrowserInfo> {
     result
 }
 
+/// Determine the system default browser on Linux.
+///
+/// Queries the desktop environment's default web browser entry (via xdg-settings) and attempts to
+/// map that desktop entry to a known browser candidate. If a matching candidate is found this
+/// returns a `SystemDefaultBrowser` populated with the desktop entry identifier, the candidate's
+/// display name, kind and channel. If the candidate's executable can be resolved on the system,
+/// `path` will contain the executable path; otherwise `path` is `None`.
+///
+/// Returns `None` if the default desktop entry cannot be determined.
+///
+/// # Examples
+///
+/// ```no_run
+/// use pathway::detect_inventory;
+///
+/// let inventory = detect_inventory();
+/// let sys = &inventory.system_default;
+/// println!("Default browser: {} ({})", sys.display_name, sys.identifier);
+/// ```
 pub fn system_default_browser() -> Option<SystemDefaultBrowser> {
     if let Some(entry) = query_default_desktop_entry() {
         if let Some(candidate) = linux_candidates()
@@ -72,7 +91,48 @@ pub fn system_default_browser() -> Option<SystemDefaultBrowser> {
     None
 }
 
+/// Launches the given URLs using the specified launch target.
+///
+/// This is a convenience wrapper around `launch_with_profile` that does not
+/// supply profile or window options.
+///
+/// # Examples
+///
+/// ```no_run
+/// use pathway::browser::{launch, LaunchTarget};
+///
+/// let urls = vec!["https://example.com".to_string()];
+/// // Launch using the system default browser
+/// let _ = launch(LaunchTarget::SystemDefault, &urls);
+/// ```
 pub fn launch(target: LaunchTarget<'_>, urls: &[String]) -> Result<LaunchOutcome, LaunchError> {
+    launch_with_profile(target, urls, None, None)
+}
+
+/// Launches one or more URLs using either a specific browser or the system default, optionally applying profile and window options.
+///
+/// If `target` is `LaunchTarget::Browser`, this will resolve the browser executable and spawn it with the provided URLs. If both `profile_opts` and `window_opts` are supplied, profile-specific CLI arguments are generated and prepended to the browser command.
+/// If `target` is `LaunchTarget::SystemDefault`, each URL is opened via `xdg-open`.
+///
+/// Returns `Err(LaunchError::NoUrls)` when `urls` is empty. Returns `Err(LaunchError::MissingExecutable(...))` when the chosen browser has no resolvable executable. Spawn failures are returned as `LaunchError::Spawn { source }`.
+///
+/// # Examples
+///
+/// ```
+/// # use std::path::PathBuf;
+/// # use pathway::browser::LaunchTarget;
+/// # use pathway::browser::launch_with_profile;
+/// // Open two URLs with the system default browser
+/// let urls = vec!["https://example.com".to_string(), "https://rust-lang.org".to_string()];
+/// let outcome = launch_with_profile(LaunchTarget::SystemDefault, &urls, None, None);
+/// assert!(outcome.is_ok());
+/// ```
+pub fn launch_with_profile(
+    target: LaunchTarget<'_>,
+    urls: &[String],
+    profile_opts: Option<&crate::profile::ProfileOptions>,
+    window_opts: Option<&crate::profile::WindowOptions>,
+) -> Result<LaunchOutcome, LaunchError> {
     if urls.is_empty() {
         return Err(LaunchError::NoUrls);
     }
@@ -84,17 +144,41 @@ pub fn launch(target: LaunchTarget<'_>, urls: &[String]) -> Result<LaunchOutcome
                 .ok_or_else(|| LaunchError::MissingExecutable(info.display_name.clone()))?;
 
             let mut command = Command::new(exec);
+
+            let has_profile_args =
+                if let (Some(profile_opts), Some(window_opts)) = (profile_opts, window_opts) {
+                    let profile_args = crate::profile::ProfileManager::generate_profile_args(
+                        info,
+                        profile_opts,
+                        window_opts,
+                    );
+                    command.args(&profile_args);
+                    !profile_args.is_empty()
+                } else {
+                    false
+                };
+
             command.args(urls);
             command.stdin(Stdio::null());
             command.stdout(Stdio::null());
             command.stderr(Stdio::null());
-            debug!(program = %exec.display(), args = ?urls, "Launching browser");
+
+            let all_args: Vec<String> = command
+                .get_args()
+                .map(|s| s.to_string_lossy().to_string())
+                .collect();
+            let log_message = if has_profile_args {
+                "Launching browser with profile"
+            } else {
+                "Launching browser"
+            };
+            debug!(program = %exec.display(), args = ?all_args, "{}", log_message);
             command.spawn()?;
 
             let cmd = LaunchCommand {
                 program: exec.to_path_buf(),
-                args: urls.to_vec(),
-                display: format!("{} {}", exec.display(), urls.join(" ")),
+                args: all_args.clone(),
+                display: format!("{} {}", exec.display(), all_args.join(" ")),
                 is_system_default: false,
             };
 
@@ -107,6 +191,14 @@ pub fn launch(target: LaunchTarget<'_>, urls: &[String]) -> Result<LaunchOutcome
         LaunchTarget::SystemDefault => {
             for url in urls {
                 let mut command = Command::new("xdg-open");
+
+                if let Some(window_opts) = window_opts {
+                    if window_opts.new_window {
+                        // xdg-open doesn't support a new window flag, so we log this limitation
+                        debug!("new-window option requested but xdg-open has no new-window flag - option ignored");
+                    }
+                }
+
                 command.arg(url);
                 command.stdin(Stdio::null());
                 command.stdout(Stdio::null());
@@ -118,7 +210,11 @@ pub fn launch(target: LaunchTarget<'_>, urls: &[String]) -> Result<LaunchOutcome
             let cmd = LaunchCommand {
                 program: PathBuf::from("xdg-open"),
                 args: urls.to_vec(),
-                display: format!("xdg-open {}", urls.join(" ")),
+                display: urls
+                    .iter()
+                    .map(|u| format!("xdg-open {}", u))
+                    .collect::<Vec<_>>()
+                    .join(" && "),
                 is_system_default: true,
             };
 
