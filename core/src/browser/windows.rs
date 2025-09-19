@@ -70,19 +70,19 @@ pub fn launch(target: LaunchTarget<'_>, urls: &[String]) -> Result<LaunchOutcome
         }
         LaunchTarget::SystemDefault => {
             for url in urls {
-                let mut command = Command::new("cmd");
-                command.arg("/C").arg("start").arg("").arg(url);
+                let mut command = Command::new("rundll32");
+                command.arg("url.dll,FileProtocolHandler").arg(url);
                 command.stdin(Stdio::null());
                 command.stdout(Stdio::null());
                 command.stderr(Stdio::null());
-                debug!(program = "cmd", url = %url, "Launching system default browser");
+                debug!(program = "rundll32 url.dll,FileProtocolHandler", url = %url, "Launching system default browser");
                 command.spawn()?;
             }
 
             let cmd = LaunchCommand {
-                program: PathBuf::from("cmd"),
+                program: PathBuf::from("rundll32"),
                 args: urls.to_vec(),
-                display: format!("cmd /C start {}", urls.join(" ")),
+                display: format!("rundll32 url.dll,FileProtocolHandler {}", urls.join(" ")),
                 is_system_default: true,
             };
 

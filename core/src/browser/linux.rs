@@ -395,28 +395,13 @@ fn linux_search_directories() -> Vec<PathBuf> {
 }
 
 fn flatpak_bin_dirs() -> Vec<PathBuf> {
-    let mut dirs = Vec::new();
-    collect_flatpak_bins(Path::new("/var/lib/flatpak/app"), &mut dirs);
+    let mut dirs = vec![PathBuf::from("/var/lib/flatpak/exports/bin")];
     if let Ok(home) = env::var("HOME") {
-        collect_flatpak_bins(Path::new(&home).join(".var/app"), &mut dirs);
-    }
-    dirs
-}
-
-fn collect_flatpak_bins<P: AsRef<Path>>(root: P, output: &mut Vec<PathBuf>) {
-    let root = root.as_ref();
-    if !root.exists() {
-        return;
+        dirs.push(Path::new(&home).join(".local/share/flatpak/exports/bin"));
     }
 
-    if let Ok(entries) = fs::read_dir(root) {
-        for entry in entries.flatten() {
-            let path = entry.path().join("current/active/files/bin");
-            if path.is_dir() {
-                output.push(path);
-            }
-        }
-    }
+    // Only add paths that actually exist
+    dirs.into_iter().filter(|path| path.exists()).collect()
 }
 
 fn locate_executable(binary: &str, dirs: &[PathBuf]) -> Option<PathBuf> {

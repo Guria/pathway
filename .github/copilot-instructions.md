@@ -172,7 +172,7 @@ $ cargo run -- --verbose example.com
 - **Performance**: Fast validation, first build ~1-3min, incremental builds are fast
 
 ## CI/CD
-- **Required**: `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test` must pass
+- **Required**: `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test` must pass
 - **Workflows**: Multi-platform CI, quality checks, automated releases, dependency updates
 - **Security**: Automated audits, license compliance via `cargo-deny`
 

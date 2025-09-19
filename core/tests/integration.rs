@@ -35,6 +35,7 @@ fn test_auto_https_scheme() {
 }
 
 #[test]
+#[cfg(unix)]
 fn test_file_url() {
     let mut cmd = Command::cargo_bin("pathway").unwrap();
     cmd.args(["--no-launch", "file:///etc/hosts"])
@@ -128,6 +129,7 @@ fn test_mixed_valid_invalid() {
 }
 
 #[test]
+#[cfg(unix)]
 fn test_path_traversal_detection() {
     let mut cmd = Command::cargo_bin("pathway").unwrap();
     cmd.args(["--no-launch", "file:///../../../etc/passwd"])
