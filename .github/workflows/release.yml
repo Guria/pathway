@@ -58,7 +58,6 @@ jobs:
           prerelease: false
           generate_release_notes: true
           make_latest: true
-          target_commitish: ${{ github.sha }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -192,6 +191,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   publish-crate:
+    if: vars.ENABLE_PUBLISH == 'true'
     name: Publish to crates.io
     needs: build-release
     runs-on: ubuntu-latest
