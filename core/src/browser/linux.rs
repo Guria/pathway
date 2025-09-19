@@ -73,6 +73,15 @@ pub fn system_default_browser() -> Option<SystemDefaultBrowser> {
 }
 
 pub fn launch(target: LaunchTarget<'_>, urls: &[String]) -> Result<LaunchOutcome, LaunchError> {
+    launch_with_profile(target, urls, None, None)
+}
+
+pub fn launch_with_profile(
+    target: LaunchTarget<'_>,
+    urls: &[String],
+    profile_opts: Option<&crate::profile::ProfileOptions>,
+    window_opts: Option<&crate::profile::WindowOptions>,
+) -> Result<LaunchOutcome, LaunchError> {
     if urls.is_empty() {
         return Err(LaunchError::NoUrls);
     }
@@ -84,17 +93,32 @@ pub fn launch(target: LaunchTarget<'_>, urls: &[String]) -> Result<LaunchOutcome
                 .ok_or_else(|| LaunchError::MissingExecutable(info.display_name.clone()))?;
 
             let mut command = Command::new(exec);
+
+            if let (Some(profile_opts), Some(window_opts)) = (profile_opts, window_opts) {
+                let profile_args = crate::profile::ProfileManager::generate_profile_args(
+                    info,
+                    profile_opts,
+                    window_opts,
+                );
+                command.args(&profile_args);
+            }
+
             command.args(urls);
             command.stdin(Stdio::null());
             command.stdout(Stdio::null());
             command.stderr(Stdio::null());
-            debug!(program = %exec.display(), args = ?urls, "Launching browser");
+            debug!(program = %exec.display(), args = ?urls, "Launching browser with profile");
             command.spawn()?;
+
+            let all_args: Vec<String> = command
+                .get_args()
+                .map(|s| s.to_string_lossy().to_string())
+                .collect();
 
             let cmd = LaunchCommand {
                 program: exec.to_path_buf(),
-                args: urls.to_vec(),
-                display: format!("{} {}", exec.display(), urls.join(" ")),
+                args: all_args.clone(),
+                display: format!("{} {}", exec.display(), all_args.join(" ")),
                 is_system_default: false,
             };
 
@@ -107,6 +131,14 @@ pub fn launch(target: LaunchTarget<'_>, urls: &[String]) -> Result<LaunchOutcome
         LaunchTarget::SystemDefault => {
             for url in urls {
                 let mut command = Command::new("xdg-open");
+
+                if let Some(window_opts) = window_opts {
+                    if window_opts.new_window {
+                        // Note: xdg-open doesn't have a direct new window option
+                        // This is platform-specific behavior
+                    }
+                }
+
                 command.arg(url);
                 command.stdin(Stdio::null());
                 command.stdout(Stdio::null());

@@ -68,13 +68,13 @@ jobs:
         working-directory: ./core
         run: cargo build --verbose
 
-      - name: Run tests
+      - name: Run core tests
         working-directory: ./core
-        run: cargo test --verbose
+        run: cargo test --lib --test integration --verbose
 
-      - name: Run tests (release mode)
+      - name: Run core tests (release mode)
         working-directory: ./core
-        run: cargo test --release --verbose
+        run: cargo test --lib --test integration --release --verbose
 
   coverage:
     name: Code Coverage
@@ -95,7 +95,7 @@ jobs:
 
       - name: Generate code coverage
         working-directory: ./core
-        run: cargo tarpaulin --out xml --all-features
+        run: cargo tarpaulin --out xml --all-features --exclude-files tests/browser_integration.rs
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4

@@ -224,12 +224,37 @@ pub fn launch(target: LaunchTarget<'_>, urls: &[String]) -> Result<LaunchOutcome
     platform::launch(target, urls)
 }
 
+pub fn launch_with_profile(
+    target: LaunchTarget<'_>,
+    urls: &[String],
+    profile_opts: Option<&crate::profile::ProfileOptions>,
+    window_opts: Option<&crate::profile::WindowOptions>,
+) -> Result<LaunchOutcome, LaunchError> {
+    platform::launch_with_profile(target, urls, profile_opts, window_opts)
+}
+
+fn browser_matches(
+    browser: &BrowserInfo,
+    normalized: &str,
+    channel: Option<BrowserChannel>,
+) -> bool {
+    browser.matches_token(normalized, channel)
+}
+
 pub fn find_browser<'a>(
     browsers: &'a [BrowserInfo],
     token: &str,
     channel: Option<BrowserChannel>,
 ) -> Option<&'a BrowserInfo> {
     let normalized = normalize_token(token);
+
+    if let Some(browser) = browsers
+        .iter()
+        .find(|browser| browser_matches(browser, &normalized, channel))
+    {
+        return Some(browser);
+    }
+
     browsers
         .iter()
         .find(|browser| browser.matches_token(&normalized, channel))

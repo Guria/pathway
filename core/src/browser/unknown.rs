@@ -29,6 +29,15 @@ pub fn system_default_browser() -> Option<SystemDefaultBrowser> {
 }
 
 pub fn launch(target: LaunchTarget<'_>, urls: &[String]) -> Result<LaunchOutcome, LaunchError> {
+    launch_with_profile(target, urls, None, None)
+}
+
+pub fn launch_with_profile(
+    target: LaunchTarget<'_>,
+    urls: &[String],
+    _profile_opts: Option<&crate::profile::ProfileOptions>,
+    _window_opts: Option<&crate::profile::WindowOptions>,
+) -> Result<LaunchOutcome, LaunchError> {
     if urls.is_empty() {
         return Err(LaunchError::NoUrls);
     }

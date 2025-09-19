@@ -71,50 +71,122 @@ pub fn system_default_browser() -> Option<SystemDefaultBrowser> {
 }
 
 pub fn launch(target: LaunchTarget<'_>, urls: &[String]) -> Result<LaunchOutcome, LaunchError> {
+    launch_with_profile(target, urls, None, None)
+}
+
+pub fn launch_with_profile(
+    target: LaunchTarget<'_>,
+    urls: &[String],
+    profile_opts: Option<&crate::profile::ProfileOptions>,
+    window_opts: Option<&crate::profile::WindowOptions>,
+) -> Result<LaunchOutcome, LaunchError> {
     if urls.is_empty() {
         return Err(LaunchError::NoUrls);
     }
 
     match target {
         LaunchTarget::Browser(info) => {
-            let exec = info
-                .launch_path()
-                .ok_or_else(|| LaunchError::MissingExecutable(info.display_name.clone()))?;
+            if info.kind == crate::browser::BrowserKind::Safari {
+                let mut command = Command::new("open");
+                command.arg("-b").arg("com.apple.Safari");
 
-            let mut command = Command::new(exec);
-            command.args(urls);
-            command.stdin(Stdio::null());
-            command.stdout(Stdio::null());
-            command.stderr(Stdio::null());
-            debug!(program = %exec.display(), args = ?urls, "Launching browser");
-            command.spawn()?;
+                if let Some(window_opts) = window_opts {
+                    if window_opts.new_window {
+                        command.arg("--new");
+                    }
+                }
 
-            let cmd = LaunchCommand {
-                program: exec.to_path_buf(),
-                args: urls.to_vec(),
-                display: format!("{} {}", exec.display(), urls.join(" ")),
-                is_system_default: false,
-            };
+                command.args(urls);
+                command.stdin(Stdio::null());
+                command.stdout(Stdio::null());
+                command.stderr(Stdio::null());
 
-            Ok(LaunchOutcome {
-                browser: Some(info.clone()),
-                system_default: None,
-                command: cmd,
-            })
+                let all_args: Vec<String> = command
+                    .get_args()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .collect();
+                debug!(program = "open", args = ?all_args, "Launching Safari via open command");
+                command.spawn()?;
+
+                let cmd = LaunchCommand {
+                    program: PathBuf::from("open"),
+                    args: all_args.clone(),
+                    display: format!("open {}", all_args.join(" ")),
+                    is_system_default: false,
+                };
+
+                Ok(LaunchOutcome {
+                    browser: Some(info.clone()),
+                    system_default: None,
+                    command: cmd,
+                })
+            } else {
+                let exec = info
+                    .launch_path()
+                    .ok_or_else(|| LaunchError::MissingExecutable(info.display_name.clone()))?;
+
+                let mut command = Command::new(exec);
+
+                if let (Some(profile_opts), Some(window_opts)) = (profile_opts, window_opts) {
+                    let profile_args = crate::profile::ProfileManager::generate_profile_args(
+                        info,
+                        profile_opts,
+                        window_opts,
+                    );
+                    command.args(&profile_args);
+                }
+
+                command.args(urls);
+                command.stdin(Stdio::null());
+                command.stdout(Stdio::null());
+                command.stderr(Stdio::null());
+
+                let all_args: Vec<String> = command
+                    .get_args()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .collect();
+                debug!(program = %exec.display(), args = ?all_args, "Launching browser with profile");
+                command.spawn()?;
+
+                let cmd = LaunchCommand {
+                    program: exec.to_path_buf(),
+                    args: all_args.clone(),
+                    display: format!("{} {}", exec.display(), all_args.join(" ")),
+                    is_system_default: false,
+                };
+
+                Ok(LaunchOutcome {
+                    browser: Some(info.clone()),
+                    system_default: None,
+                    command: cmd,
+                })
+            }
         }
         LaunchTarget::SystemDefault => {
             let mut command = Command::new("open");
+
+            if let Some(window_opts) = window_opts {
+                if window_opts.new_window {
+                    command.arg("--new");
+                }
+            }
+
             command.args(urls);
             command.stdin(Stdio::null());
             command.stdout(Stdio::null());
             command.stderr(Stdio::null());
-            debug!(program = "open", args = ?urls, "Launching system default browser");
+
+            let all_args: Vec<String> = command
+                .get_args()
+                .map(|s| s.to_string_lossy().to_string())
+                .collect();
+            debug!(program = "open", args = ?all_args, "Launching system default browser");
             command.spawn()?;
 
             let cmd = LaunchCommand {
                 program: PathBuf::from("open"),
-                args: urls.to_vec(),
-                display: format!("open {}", urls.join(" ")),
+                args: all_args.clone(),
+                display: format!("open {}", all_args.join(" ")),
                 is_system_default: true,
             };
 
