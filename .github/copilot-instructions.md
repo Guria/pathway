@@ -1,26 +1,23 @@
 # Pathway URL Router - GitHub Copilot Instructions
 
-Pathway is a lightweight Rust CLI application for URL validation and routing. Always reference these instructions first and fallback to search or bash commands only when you encounter unexpected information that does not match the info here.
+Pathway is a lightweight Rust CLI tool for URL validation and routing. It validates URLs against security policies and can launch matched URLs in a configured browser according to routing rules.
 
 ## Working Effectively
 
 ### Bootstrap, Build, and Test the Repository
-- Install Rust toolchain: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y`
-- Load Rust environment: `source ~/.cargo/env`
-- Verify installation: `rustc --version && cargo --version`
-- Navigate to core directory: `cd core/`
-- Build debug version: `cargo build` -- takes 38 seconds first time. NEVER CANCEL. Set timeout to 90+ minutes for first build.
-- Build release version: `cargo build --release` -- takes 25 seconds first time. NEVER CANCEL. Set timeout to 90+ minutes.
-- Run test suite: `cargo test` -- takes 11 seconds. NEVER CANCEL. Set timeout to 30+ minutes.
+- Navigate to the `core/` directory before running cargo commands.
+- Build debug version: `cargo build` — first build may take ~1–3 minutes depending on network and cache.
+- Build release version: `cargo build --release` — first build may take ~1–3 minutes.
+- Run test suite: `cargo test` — first run may take ~10–60 seconds.
 - Run unit tests only: `cargo test --lib` -- takes <1 second
 - Run integration tests only: `cargo test --test integration` -- takes <1 second
 
 ### Code Quality and Linting
 - Format code: `cargo fmt`
 - Check formatting: `cargo fmt --check` -- passes cleanly with configured .rustfmt.toml
-- Run linter: `cargo clippy` -- takes 8 seconds. Should pass without warnings.
+- Run linter: `cargo clippy -D warnings` — fail on any warnings.
 - Fix linting issues: `cargo clippy --fix`
-- ALWAYS run `cargo fmt` and `cargo clippy` before committing or CI will fail
+- ALWAYS run `cargo fmt` and `cargo clippy -D warnings` before committing or CI will fail
 
 ### Run the Application
 - Help: `cargo run -- --help`
@@ -34,7 +31,7 @@ Pathway is a lightweight Rust CLI application for URL validation and routing. Al
 
 ## Validation Scenarios
 
-ALWAYS test the following scenarios after making changes to ensure core functionality works:
+It is recommended to test the following scenarios after making changes to ensure core functionality works:
 
 ### Basic Functionality Test
 ```bash
@@ -70,8 +67,8 @@ cargo run -- ftp://example.com
 ## Repository Structure
 
 ### Key Directories and Files
-```
-/home/runner/work/pathway/pathway/
+```text
+pathway/
 ├── README.md              # Project overview and status
 ├── .mise.toml            # Rust 1.82 toolchain configuration
 ├── .rustfmt.toml         # Rust formatting configuration
@@ -148,16 +145,16 @@ cd core/ && cargo install --path .
 ### Expected Output Examples
 ```bash
 $ cargo run -- https://example.com
-# 2025-09-16T21:00:10.032646Z  INFO pathway: URL validated: https://example.com/ (scheme: https)
+# <timestamp>  INFO pathway: URL validated: https://example.com/ (scheme: https)
 
 $ cargo run -- --format json https://example.com
 # [{"original":"https://example.com","url":"https://example.com/","normalized":"https://example.com/","scheme":"https","status":"valid"}]
 
 $ cargo run -- --verbose example.com
-# 2025-09-16T20:59:40.984854Z DEBUG pathway::url: Input: "example.com"
-# 2025-09-16T20:59:40.984916Z DEBUG pathway::url: Auto-detected scheme: https://example.com
-# 2025-09-16T20:59:40.984969Z DEBUG pathway::url: Normalized: https://example.com/
-# 2025-09-16T20:59:40.984992Z  INFO pathway: URL validated: https://example.com/ (scheme: https)
+# <timestamp> DEBUG pathway::url: Input: "example.com"
+# <timestamp> DEBUG pathway::url: Auto-detected scheme: https://example.com
+# <timestamp> DEBUG pathway::url: Normalized: https://example.com/
+# <timestamp>  INFO pathway: URL validated: https://example.com/ (scheme: https)
 ```
 
 ## Security Features
@@ -167,12 +164,9 @@ $ cargo run -- --verbose example.com
 - Safe auto-scheme detection (adds https:// for domains, file:// for paths)
 
 ## Performance Characteristics
-- First build: ~38 seconds (dependencies download)
-- Incremental builds: <1 second
-- Release build: ~25 seconds first time, <1 second subsequent
-- Test suite: ~11 seconds (19 tests) first time, <1 second subsequent
-- Release test suite: ~17 seconds first time
-- Runtime: <200ms for URL validation
+- First builds may take minutes depending on network/cache; subsequent incremental builds are typically fast.
+- Test suite usually completes in seconds locally; CI times vary by runner.
+- URL validation is lightweight (typically sub‑second per URL).
 
 ## CI/CD Requirements
 - Code must pass `cargo fmt --check` (configured with .rustfmt.toml)
@@ -201,7 +195,7 @@ Run these commands to match CI requirements:
 ```bash
 cd core/
 cargo fmt --check    # Must pass
-cargo clippy --      # Must have no warnings  
+cargo clippy -D warnings   # Must have no warnings
 cargo test          # All tests must pass
 cargo install cargo-audit  # Install security audit tool (if not present)
 cargo audit         # Security audit must pass
