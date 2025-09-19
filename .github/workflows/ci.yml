@@ -125,8 +125,14 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v4
 
-      - name: Run cargo-audit
-        uses: rustsec/audit-check@v1
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          working-directory: ./core
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: Run cargo audit
+        working-directory: ./core
+        env:
+          RUSTSEC_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: cargo audit
