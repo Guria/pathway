@@ -17,8 +17,8 @@ Pathway is a lightweight Rust CLI application for URL validation and routing. Al
 
 ### Code Quality and Linting
 - Format code: `cargo fmt`
-- Check formatting: `cargo fmt --check` -- will show diff if formatting is needed. Code currently has formatting issues.
-- Run linter: `cargo clippy` -- takes 8 seconds. Currently shows 1 warning about redundant import.
+- Check formatting: `cargo fmt --check` -- passes cleanly with configured .rustfmt.toml
+- Run linter: `cargo clippy` -- takes 8 seconds. Should pass without warnings.
 - Fix linting issues: `cargo clippy --fix`
 - ALWAYS run `cargo fmt` and `cargo clippy` before committing or CI will fail
 
@@ -74,7 +74,20 @@ cargo run -- ftp://example.com
 /home/runner/work/pathway/pathway/
 ├── README.md              # Project overview and status
 ├── .mise.toml            # Rust 1.82 toolchain configuration
+├── .rustfmt.toml         # Rust formatting configuration
+├── rust-toolchain.toml   # Rust toolchain specification
 ├── .gitignore            # Standard Rust gitignore
+├── .github/              # GitHub workflows and configurations
+│   ├── workflows/        # CI/CD workflows
+│   │   ├── ci.yml        # Main CI pipeline (test on multiple platforms)
+│   │   ├── quality.yml   # Code quality checks (fmt, clippy, audit)
+│   │   ├── release.yml   # Automated releases and binaries
+│   │   ├── benchmark.yml # Performance benchmarking
+│   │   ├── dependency-review.yml # Dependency security review
+│   │   ├── pr-labeler.yml # Auto-label PRs
+│   │   └── update-deps.yml # Dependabot updates
+│   ├── dependabot.yml    # Dependabot configuration
+│   └── labeler.yml       # PR labeling rules
 └── core/                 # Main Rust project
     ├── Cargo.toml        # Dependencies and project metadata
     ├── Cargo.lock        # Locked dependency versions
@@ -94,6 +107,8 @@ cargo run -- ftp://example.com
 - Error handling: `core/src/error.rs` (PathwayError enum)
 - Security validation: Path traversal detection in `core/src/url.rs`
 - Test coverage: Comprehensive integration tests in `core/tests/integration.rs`
+- CI/CD workflows: `.github/workflows/` (comprehensive automation)
+- Code formatting: `.rustfmt.toml` (project-specific formatting rules)
 
 ## Build System and Dependencies
 
@@ -160,10 +175,37 @@ $ cargo run -- --verbose example.com
 - Runtime: <200ms for URL validation
 
 ## CI/CD Requirements
-- Code must pass `cargo fmt --check`
+- Code must pass `cargo fmt --check` (configured with .rustfmt.toml)
 - Code must pass `cargo clippy` without warnings
 - All tests must pass with `cargo test`
 - Release build must succeed with `cargo build --release`
+- Security audit must pass: `cargo audit`
+- Dependencies are automatically updated via Dependabot
+
+## GitHub Actions Workflows
+The repository includes comprehensive CI/CD automation:
+
+### Core Workflows
+- **CI (`ci.yml`)**: Runs tests on Ubuntu, macOS, Windows with stable, beta, nightly Rust
+- **Quality (`quality.yml`)**: Enforces code formatting, linting, and security audits
+- **Release (`release.yml`)**: Automated releases with cross-platform binaries
+- **Dependency Review**: Security scanning for new dependencies
+
+### Development Workflows  
+- **Benchmark (`benchmark.yml`)**: Performance regression testing
+- **PR Labeler**: Auto-labels PRs based on file changes
+- **Update Dependencies**: Automated dependency updates via Dependabot
+
+### Local CI Validation
+Run these commands to match CI requirements:
+```bash
+cd core/
+cargo fmt --check    # Must pass
+cargo clippy --      # Must have no warnings  
+cargo test          # All tests must pass
+cargo install cargo-audit  # Install security audit tool (if not present)
+cargo audit         # Security audit must pass
+```
 
 ## Development Tips
 - Always work in the `core/` directory for Rust commands
