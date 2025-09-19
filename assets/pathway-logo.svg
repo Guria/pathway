@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <!-- Black rounded rectangle background -->
+  <rect x="50" y="50" width="412" height="412" rx="72" ry="72" fill="#1a1a1a"/>
+  
+  <!-- Path routing symbol in white -->
+  <g fill="white">
+    <!-- Left chevron > -->
+    <path d="M 140 200 L 180 160 L 195 175 L 170 200 L 195 225 L 180 240 Z"/>
+    
+    <!-- Curved connector representing pathway/routing -->
+    <path d="M 180 200 L 220 200 Q 260 200 260 240 Q 260 280 220 280 L 180 280 Q 140 280 140 240 Q 140 200 180 200 Z" 
+          fill="none" stroke="white" stroke-width="20" stroke-linecap="round"/>
+    
+    <!-- Right chevron > -->
+    <path d="M 320 160 L 360 200 L 320 240 L 335 225 L 360 200 L 335 175 Z"/>
+  </g>
+  
+  <!-- Text "pathway" -->
+  <text x="256" y="420" font-family="system-ui, -apple-system, sans-serif" font-size="64" font-weight="400" text-anchor="middle" fill="#1a1a1a">pathway</text>
+</svg>

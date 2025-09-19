@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/458d1989-96af-4af0-b24b-3dfc615a249f" alt="Pathway Logo" width="200">
+  <img src="./assets/pathway-logo.svg" alt="Pathway Logo" width="200">
 </p>
 
 <h1 align="center">Pathway</h1>
