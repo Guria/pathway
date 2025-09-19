@@ -52,14 +52,14 @@ This directory contains comprehensive GitHub Actions workflows for the Pathway p
 
 ## Local Tool Execution Results
 
-### ✅ Successfully Run:
+### ✅ Successfully Run
 - `cargo fmt --all -- --check` - Code formatting verified
 - `cargo clippy --all-targets --all-features -- -D warnings` - No linting issues
 - `cargo test --verbose` - All tests pass
 - `cargo test --release --verbose` - All tests pass in release mode
 - `cargo doc --no-deps --document-private-items --all-features` - Documentation builds
 
-### ✅ Additional Tools:
+### ✅ Additional Tools
 These tools are compatible with stable Rust toolchains and provide extended functionality:
 - `cargo-machete` - For checking unused dependencies
 - `cargo-deny` - For license and security checks  
@@ -93,3 +93,4 @@ All workflows will run automatically based on their triggers. You can also manua
 - Uncomment the actual `cargo publish` line when ready to publish
 - Binary stripping is configured for Linux and macOS builds to reduce size
 - Cross-compilation is set up for ARM64 Linux targets
+- SHA256 checksums are generated alongside release assets for supply-chain verification
