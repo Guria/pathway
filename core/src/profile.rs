@@ -1117,10 +1117,6 @@ pub fn validate_profile_options(
 ) -> Result<Vec<String>, ProfileError> {
     let mut warnings = Vec::new();
 
-    if window_opts.incognito && !matches!(profile_opts.profile_type, ProfileType::Default) {
-        warnings.push("Incognito mode ignores profile selection".to_string());
-    }
-
     match browser.kind {
         BrowserKind::Safari => {
             match &profile_opts.profile_type {
