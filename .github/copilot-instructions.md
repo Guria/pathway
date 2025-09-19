@@ -1,10 +1,16 @@
 # Pathway URL Router - GitHub Copilot Instructions
 
-Pathway is a lightweight Rust CLI tool for URL validation and routing. It validates URLs against security policies and can launch matched URLs in a configured browser according to routing rules.
+Pathway is a lightweight Rust CLI tool for URL validation and routing with browser launching capabilities.
+
+## Maintaining These Instructions
+- Update when major features/structure changes occur
+- Remove outdated information immediately  
+- Keep commands/examples current with actual codebase
+- Verify all referenced files/paths exist
 
 ## Working Effectively
 
-### Bootstrap, Build, and Test the Repository
+### Bootstrap, Build, and Test
 - Navigate to the `core/` directory before running cargo commands.
 - Build debug version: `cargo build` — first build may take ~1–3 minutes depending on network and cache.
 - Build release version: `cargo build --release` — first build may take ~1–3 minutes.
@@ -87,25 +93,30 @@ pathway/
 │   └── labeler.yml       # PR labeling rules
 └── core/                 # Main Rust project
     ├── Cargo.toml        # Dependencies and project metadata
-    ├── Cargo.lock        # Locked dependency versions
+    ├── deny.toml         # License and security configuration
     ├── src/
-    │   ├── main.rs       # CLI entry point with clap argument parsing
+    │   ├── main.rs       # CLI entry point
     │   ├── lib.rs        # Library exports
     │   ├── url.rs        # Core URL validation logic
-    │   ├── error.rs      # Error types with thiserror
-    │   └── logging.rs    # Tracing/logging setup
+    │   ├── error.rs      # Error types
+    │   ├── logging.rs    # Tracing/logging setup
+    │   └── browser/      # Browser launching functionality
+    │       ├── mod.rs    # Cross-platform browser interface
+    │       ├── macos.rs  # macOS browser support
+    │       ├── linux.rs  # Linux browser support
+    │       ├── windows.rs # Windows browser support
+    │       └── unknown.rs # Fallback for unknown platforms
     └── tests/
-        └── integration.rs # 15 integration tests using assert_cmd
+        └── integration.rs # Integration tests
 ```
 
 ### Important Code Locations
-- CLI argument parsing: `core/src/main.rs` (clap-based)
-- URL validation logic: `core/src/url.rs` (supports http/https/file schemes)
-- Error handling: `core/src/error.rs` (PathwayError enum)
-- Security validation: Path traversal detection in `core/src/url.rs`
-- Test coverage: Comprehensive integration tests in `core/tests/integration.rs`
-- CI/CD workflows: `.github/workflows/` (comprehensive automation)
-- Code formatting: `.rustfmt.toml` (project-specific formatting rules)
+- CLI interface: `core/src/main.rs`
+- URL validation: `core/src/url.rs` (http/https/file schemes, path traversal detection)
+- Browser launching: `core/src/browser/` (cross-platform browser support)
+- Error handling: `core/src/error.rs`
+- Tests: `core/tests/integration.rs`
+- CI/CD: `.github/workflows/`
 
 ## Build System and Dependencies
 
@@ -123,7 +134,6 @@ pathway/
 ### Build Artifacts
 - Debug binary: `core/target/debug/pathway`
 - Release binary: `core/target/release/pathway`
-- Test coverage: All 19 tests must pass (4 unit + 15 integration)
 
 ## Common Commands Reference
 
@@ -157,54 +167,17 @@ $ cargo run -- --verbose example.com
 # <timestamp>  INFO pathway: URL validated: https://example.com/ (scheme: https)
 ```
 
-## Security Features
-- Rejects dangerous schemes: javascript, data, vbscript, about, blob, ftp, sftp, ssh, telnet
-- Path traversal detection for file:// URLs
-- URL normalization and validation
-- Safe auto-scheme detection (adds https:// for domains, file:// for paths)
+## Security & Performance
+- **Security**: Blocks dangerous schemes, detects path traversal, normalizes URLs
+- **Performance**: Fast validation, first build ~1-3min, incremental builds are fast
 
-## Performance Characteristics
-- First builds may take minutes depending on network/cache; subsequent incremental builds are typically fast.
-- Test suite usually completes in seconds locally; CI times vary by runner.
-- URL validation is lightweight (typically sub‑second per URL).
-
-## CI/CD Requirements
-- Code must pass `cargo fmt --check` (configured with .rustfmt.toml)
-- Code must pass `cargo clippy` without warnings
-- All tests must pass with `cargo test`
-- Release build must succeed with `cargo build --release`
-- Security audit must pass: `cargo audit`
-- Dependencies are automatically updated via Dependabot
-
-## GitHub Actions Workflows
-The repository includes comprehensive CI/CD automation:
-
-### Core Workflows
-- **CI (`ci.yml`)**: Runs tests on Ubuntu, macOS, Windows with stable, beta, nightly Rust
-- **Quality (`quality.yml`)**: Enforces code formatting, linting, and security audits
-- **Release (`release.yml`)**: Automated releases with cross-platform binaries
-- **Dependency Review**: Security scanning for new dependencies
-
-### Development Workflows  
-- **Benchmark (`benchmark.yml`)**: Performance regression testing
-- **PR Labeler**: Auto-labels PRs based on file changes
-- **Update Dependencies**: Automated dependency updates via Dependabot
-
-### Local CI Validation
-Run these commands to match CI requirements:
-```bash
-cd core/
-cargo fmt --check    # Must pass
-cargo clippy -D warnings   # Must have no warnings
-cargo test          # All tests must pass
-cargo install cargo-audit  # Install security audit tool (if not present)
-cargo audit         # Security audit must pass
-```
+## CI/CD
+- **Required**: `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test` must pass
+- **Workflows**: Multi-platform CI, quality checks, automated releases, dependency updates
+- **Security**: Automated audits, license compliance via `cargo-deny`
 
 ## Development Tips
-- Always work in the `core/` directory for Rust commands
-- Use `cargo check` for fast syntax validation during development
-- Use `cargo run -- --help` to test CLI changes quickly
+- Work in `core/` directory for Rust commands
+- Use `cargo check` for fast syntax validation
 - Test both valid and invalid URLs when modifying validation logic
-- Integration tests use `assert_cmd` to test the CLI as a black box
 - Logging goes to stderr, JSON output goes to stdout

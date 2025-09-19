@@ -13,3 +13,10 @@
 - URL validation with scheme restrictions
 - Structured logging with `tracing`
 - Comprehensive test suite
+
+✅ **Milestone 2 Complete**: Browser discovery & launch
+- Detects common browsers per-platform and reports system default
+- `--browser`, `--channel`, and `--system-default` flags control routing
+- `--list-browsers`, `--check-browser`, and `--no-launch` add diagnostics
+- Launches URLs via platform-appropriate commands with verbose command logging
+
