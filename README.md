@@ -1,73 +1,104 @@
-# Pathway Browser Router - Implementation Plan
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/458d1989-96af-4af0-b24b-3dfc615a249f" alt="Pathway Logo" width="200">
+</p>
 
-## Overview
+<h1 align="center">Pathway</h1>
 
-**Purpose**: A lightweight URL routing agent that opens URLs in the appropriate browser/profile based on configurable rules.
+<p align="center">
+  <strong>🚀 Smart URL router for developers</strong>
+</p>
 
-**Core Principle**: Simple, predictable, and fast. Portable dotfiles-like configuration.
+<p align="center">
+  Launch URLs in the right browser with the right profile, every time
+</p>
 
-## Current Status
+<p align="center">
+  <a href="https://github.com/Guria/pathway/actions/workflows/ci.yml">
+    <img src="https://github.com/Guria/pathway/workflows/CI/badge.svg" alt="CI Status">
+  </a>
+  <a href="https://github.com/Guria/pathway/actions/workflows/quality.yml">
+    <img src="https://github.com/Guria/pathway/workflows/Quality/badge.svg" alt="Code Quality">
+  </a>
+  <img src="https://img.shields.io/badge/rust-1.89+-orange.svg" alt="Rust Version">
+  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg" alt="Platform Support">
+</p>
 
-✅ **Milestone 1 Complete**: Core CLI with URL validation
-- Basic Rust CLI that validates and logs URLs
+---
+
+## ✨ Features
+
+**🎯 Smart Browser Selection**
+- Automatically detect available browsers on your system
+- Allow define browser command manually (Coming Soon)
+- Route URLs to specific browsers with custom profiles (Coming Soon)
+- Support for Chrome, Firefox, Safari, and more
+- Zero-config for basic usage with explicit arguments
+
+**👤 Profile Management**
+- Launch with named profiles (`--profile "Work"`)
+- Create temporary isolated profiles
+- Use custom user data directories
+- Guest mode and incognito support
+
+**🔒 Secure & Reliable**
 - URL validation with scheme restrictions
-- Structured logging with `tracing`
-- Comprehensive test suite
+- Path traversal protection
+- Safe fallbacks on errors
 
-✅ **Milestone 2 Complete**: Browser discovery & launch
-- Detects common browsers per-platform and reports system default
-- `--browser`, `--channel`, and `--system-default` flags control routing
-- `--list-browsers`, `--check-browser`, and `--no-launch` add diagnostics
-- Launches URLs via platform-appropriate commands with verbose command logging
+## 🚀 Quick Start
 
-✅ **Milestone 3 Complete**: Browser profiles & advanced launch options
-- Browser profile management (named, custom directories, temporary, guest)
-- Window management options (new-window, incognito, kiosk)
-- Browser-specific feature support and validation warnings
-- Profile discovery from browser configuration files
-- Enhanced JSON output with profile and window option details
-
-## Features
-
-### URL Launching
+### Basic Usage
 ```bash
-# Basic URL launching (system default browser)
+# Launch URL with system default browser
 pathway launch https://example.com
-pathway launch file:///path/to/local.html
 
-# Browser selection
-pathway launch --browser chrome https://example.com
-pathway launch --browser firefox --channel dev https://example.com
+# Use specific browser
+pathway launch --browser chrome https://github.com
 
-# Profile options
-pathway launch --browser chrome --profile "Work" https://example.com
-pathway launch --browser chrome --user-dir ~/dev-profile https://localhost:3000
-pathway launch --browser chrome --temp-profile https://example.com
-pathway launch --browser chrome --guest https://example.com
-
-# Window management
-pathway launch --browser chrome --new-window https://example.com
-pathway launch --browser chrome --incognito https://example.com
-pathway launch --browser chrome --kiosk https://presentation.com
-
-# Combined options
-pathway launch --browser chrome --profile "Work" --new-window --incognito https://example.com
-pathway launch --browser chrome --temp-profile --new-window --kiosk https://example.com
-
-# Validate without launching
-pathway launch --no-launch https://example.com
+# Launch with a specific profile
+pathway launch --browser chrome --profile "Work" https://slack.com
 ```
+
+### Advanced Examples
+```bash
+# Incognito mode for sensitive browsing
+pathway launch --browser chrome --incognito https://banking.example.com
+
+# Temporary profile for testing
+pathway launch --browser firefox --temp-profile https://localhost:3000
+
+# Multiple URLs at once
+pathway launch --browser chrome https://github.com https://stackoverflow.com
+```
+
+## 📦 Installation
+
+### From Source
+```bash
+git clone https://github.com/Guria/pathway.git
+cd pathway/core
+cargo build --release
+./target/release/pathway --help
+```
+
+### System Install
+```bash
+cd pathway/core
+cargo install --path .
+pathway --version
+```
+
+## 📖 Usage
 
 ### Browser Management
 ```bash
-# List all detected browsers
+# List available browsers
 pathway browser list
 
-# Check if specific browser is available
+# Check if a browser is available
 pathway browser check chrome
-pathway browser check firefox --channel dev
 
-# JSON output for scripting
+# Get detailed browser information
 pathway browser list --format json
 ```
 
@@ -75,79 +106,33 @@ pathway browser list --format json
 ```bash
 # List profiles for a browser
 pathway profile --browser chrome list
-pathway profile --browser helium list
 
-# Get profile details
-pathway profile --browser chrome info "Work"
-pathway profile --browser helium info "Personal"
+# Launch with named profile
+pathway launch --browser chrome --profile "Development" https://localhost:3000
 
-# List profiles from custom directory
-pathway profile --browser chrome --user-dir ~/custom-profiles list
+# Create temporary profile
+pathway launch --browser chrome --temp-profile https://example.com
 
-# JSON output for scripting
-pathway profile --browser chrome --format json list
+# Use custom user directory
+pathway launch --browser firefox --user-dir ~/my-custom-profile https://example.com
 ```
 
-## Browser Support
-
-### Chromium-Based Browsers
-**Supported**: Chrome, Edge, Brave, Vivaldi, Arc, Helium, Opera, Chromium
-
-**Features**:
-- ✅ Named profiles (`--profile-directory`)
-- ✅ Custom directories (`--user-data-dir`) 
-- ✅ Temporary profiles
-- ✅ Guest mode (`--guest`)
-- ✅ Incognito mode (`--incognito`)
-- ✅ Window management (`--new-window`, `--kiosk`)
-
-### Firefox/Waterfox
-**Features**:
-- ✅ Named profiles (`-P "ProfileName"`)
-- ✅ Custom directories (`--profile /path`)
-- ✅ Temporary profiles
-- ✅ Private windows (`--private-window`)
-- ✅ Window management (`--new-window`, `--kiosk`)
-- ⚠️ No guest mode (warns to use `--incognito`)
-
-### Safari
-**Features**:
-- ✅ Basic URL launching (via `open -b com.apple.Safari`)
-- ✅ New window support (`--new`)
-- ⚠️ No profile support (system limitation)
-- ⚠️ No command-line incognito (requires manual activation)
-- ⚠️ No kiosk mode support
-
-### Other Browsers
-**Features**:
-- ✅ Basic URL launching
-- ⚠️ Limited profile/window option support (warnings shown)
-
-## Validation & Warnings
-
-The system provides intelligent warnings for unsupported combinations:
-
+### Window Options
 ```bash
-# Safari limitations
-$ pathway launch --browser safari --temp-profile https://example.com
-WARN: Safari does not support temporary profiles
+# Open in new window
+pathway launch --browser chrome --new-window https://example.com
 
-# Firefox limitations  
-$ pathway launch --browser firefox --guest https://example.com
-WARN: Firefox does not support guest mode (use --incognito for private browsing)
+# Incognito/private mode
+pathway launch --browser chrome --incognito https://example.com
 
-# System default limitations
-$ pathway launch --temp-profile https://example.com
-WARN: Profile options require specifying a browser with --browser
-
-# Conflict resolution
-$ pathway launch --browser chrome --profile "Work" --incognito https://example.com
-WARN: Incognito mode ignores profile selection
+# Kiosk mode (fullscreen)
+pathway launch --browser chrome --kiosk https://dashboard.example.com
 ```
 
-## JSON Output
+## 🔧 Configuration
 
-All commands support `--format json` for programmatic use:
+### JSON Output
+All commands support `--format json` for programmatic integration:
 
 ```json
 {
@@ -167,139 +152,54 @@ All commands support `--format json` for programmatic use:
     "new_window": true,
     "incognito": false,
     "kiosk": false
-  },
-  "warnings": ["..."]
+  }
 }
 ```
 
-## Installation
+## 🛠️ Development
 
 ### Building from Source
 ```bash
-git clone https://github.com/guria/pathway.git
+git clone https://github.com/Guria/pathway.git
 cd pathway/core
 cargo build --release
-./target/release/pathway --help
 ```
-
-### Usage
-```bash
-# Show help
-pathway --help
-
-# Show subcommand help
-pathway launch --help
-pathway browser --help
-pathway profile --help
-
-# List detected browsers
-pathway browser list
-
-# Validate URLs without launching
-pathway launch --no-launch https://example.com
-
-# Launch with verbose logging
-pathway launch --verbose https://example.com
-```
-
-## Profile Management Deep Dive
-
-### Profile Discovery
-Pathway automatically discovers browser profiles from standard locations:
-
-**Chrome/Chromium browsers**:
-- macOS: `~/Library/Application Support/[Browser]/`
-- Linux: `~/.config/[browser]/`
-- Windows: `%APPDATA%/[Browser]/`
-- Profiles parsed from `Local State` JSON
-
-**Firefox**:
-- Profiles discovered from `profiles.ini`
-- Cross-platform profile location detection
-
-### Profile Resolution
-When you specify a profile by display name, Pathway resolves it to the actual directory:
-
-```bash
-# Shows mapping between display names and directories
-$ pathway profile --browser helium list
-Helium profiles:
-  Personal [Default] (default)    # Display name "Personal" → Directory "Default"
-  Work [Profile 1]                # Display name "Work" → Directory "Profile 1"
-  Gaming [Profile 2]              # Display name "Gaming" → Directory "Profile 2"
-```
-
-### Custom Directory Support
-Use `--user-dir` for isolated browser sessions:
-
-```bash
-# Create isolated development environment
-pathway launch --browser chrome --user-dir ~/project-a-browser https://localhost:3000
-
-# List profiles in custom directory
-pathway profile --browser chrome --user-dir ~/custom-profiles list
-```
-
-### Temporary Profiles
-Perfect for testing and privacy:
-
-```bash
-# Creates unique temporary directory
-$ pathway launch --browser chrome --temp-profile https://example.com
-INFO: Created temporary profile directory: /tmp/pathway_profile_abc123
-INFO: Launching in Google Chrome with temporary profile (/tmp/pathway_profile_abc123)
-```
-
-## Technical Details
-
-### Conflict Resolution
-Pathway handles conflicting options with clear precedence rules:
-
-1. `--incognito` overrides profile selection (with warning)
-2. `--user-dir` overrides `--profile`
-3. `--temp-profile` overrides both `--profile` and `--user-dir`
-4. `--guest` mode ignores profile settings
-
-### Security
-- Path validation prevents directory traversal attacks
-- Permission checks before directory creation
-- Profile isolation maintained
-- Temporary profiles auto-cleanup
-- Safe fallbacks on errors
-
-### Performance
-- Profile detection: < 50ms
-- Directory creation: < 100ms  
-- Launch overhead: < 100ms
-- Scales to hundreds of profiles
-
-## Development
 
 ### Running Tests
 ```bash
-cd core
+# Run all tests
 cargo test
+
+# Run unit tests only
+cargo test --lib
+
+# Run with verbose output
+cargo test -- --nocapture
 ```
 
-### Adding New Browser Support
-1. Add browser to `BrowserKind` enum
-2. Update platform detection in `browser/[platform].rs`
-3. Add profile discovery logic if needed
-4. Update validation warnings
+### Code Quality
+```bash
+# Format code
+cargo fmt
 
-## Future Roadmap
+# Run linter
+cargo clippy -- -D warnings
 
-- **Milestone 4**: URL routing rules and domain-based browser selection
-- **Milestone 5**: Configuration file support and rule persistence
-- **Milestone 6**: Advanced routing with regex patterns and conditions
+# Check formatting
+cargo fmt --check
+```
 
-## Contributing
+## 🤝 Contributing
 
-This project follows standard Rust development practices:
-- `cargo fmt` for formatting
-- `cargo clippy` for linting  
-- `cargo test` for testing
-- Comprehensive integration tests required for new features
+We welcome contributions! Please feel free to submit a Pull Request. For major changes, please open an issue first to discuss what you would like to change.
+
+### Development Setup
+1. Install Rust 1.89+
+2. Clone the repository
+3. Run `cargo test` to ensure everything works
+4. Make your changes
+5. Run `cargo fmt` and `cargo clippy`
+6. Submit a pull request
 
 ## License
 
@@ -316,3 +216,22 @@ Unless you explicitly state otherwise, any contribution intentionally submitted
 for inclusion in the work by you, as defined in the Apache-2.0 license, shall be
 dual licensed as above, without any additional terms or conditions.
 
+## 🙏 Acknowledgments
+
+- Built with [Rust](https://rustlang.org/) for performance and safety
+- Built in collaboration with wide set of LLM models, agents and AI editors, including:
+  - OpenAI ChatGPT (GPT-5 Naming and logo)
+  - Anthropic Claude (Opus 4.1 to outline CLI design and implementation milestones)
+  - Open Codex agent (extension and reviewer)
+  - GitHub Copilot Agent (extension and reviewer)
+  - CoderabbitAI (Best in class reviewer)
+  - Claude Code CLI
+  - `opencode` CLI
+  - Cursor
+  - VS Code
+
+---
+
+<p align="center">
+  <strong>⭐ Star this project if you find it useful!</strong>
+</p>
