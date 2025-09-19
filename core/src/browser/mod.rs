@@ -220,10 +220,50 @@ pub enum LaunchTarget<'a> {
     SystemDefault,
 }
 
+/// Launches the given URLs using the specified launch target.
+///
+/// Returns a `LaunchOutcome` on success or a platform-specific `LaunchError` on failure.
+///
+/// # Examples
+///
+/// ```no_run
+/// use crate::browser::{launch, LaunchTarget};
+///
+/// let urls = vec!["https://example.com".to_string()];
+/// let outcome = launch(LaunchTarget::SystemDefault, &urls);
+/// match outcome {
+///     Ok(o) => println!("Launched: {:?}", o.command.display),
+///     Err(e) => eprintln!("Launch failed: {:?}", e),
+/// }
+/// ```
 pub fn launch(target: LaunchTarget<'_>, urls: &[String]) -> Result<LaunchOutcome, LaunchError> {
     platform::launch(target, urls)
 }
 
+/// Launches a browser target with the given URLs, optionally specifying profile and window options.
+///
+/// This is a thin wrapper that delegates to the platform-specific `launch_with_profile` implementation.
+///
+/// # Parameters
+///
+/// - `target`: the launch target (a specific browser or the system default).
+/// - `urls`: list of URL strings to open.
+/// - `profile_opts`: optional profile-related options (e.g., profile name or path).
+/// - `window_opts`: optional window-related options (e.g., new window or focus behavior).
+///
+/// # Returns
+///
+/// Returns `Ok(LaunchOutcome)` on success, or `Err(LaunchError)` if the platform-specific launch failed.
+///
+/// # Examples
+///
+/// ```
+/// use crate::browser::{launch_with_profile, LaunchTarget};
+/// // Open `https://example.com` in the system default browser without special profile/window options.
+/// let urls = vec!["https://example.com".to_string()];
+/// let outcome = launch_with_profile(LaunchTarget::SystemDefault, &urls, None, None);
+/// assert!(outcome.is_ok());
+/// ```
 pub fn launch_with_profile(
     target: LaunchTarget<'_>,
     urls: &[String],
@@ -233,6 +273,30 @@ pub fn launch_with_profile(
     platform::launch_with_profile(target, urls, profile_opts, window_opts)
 }
 
+/// Returns true if the given `BrowserInfo` matches a normalized token and optional channel.
+///
+/// This is a small helper that delegates to `BrowserInfo::matches_token`.
+///
+/// # Examples
+///
+/// ```
+/// let browser = BrowserInfo {
+///     id: "chrome".into(),
+///     cli_name: "chrome".into(),
+///     display_name: "Chrome".into(),
+///     kind: BrowserKind::Chrome,
+///     channel: BrowserChannel::Stable,
+///     aliases: Vec::new(),
+///     bundle_path: None,
+///     executable: None,
+///     bundle_id: None,
+///     version: None,
+///     source: None,
+/// };
+///
+/// assert!(browser_matches(&browser, "chrome", None));
+/// assert!(browser_matches(&browser, "Chrome", None)); // normalized input is accepted by callers
+/// ```
 fn browser_matches(
     browser: &BrowserInfo,
     normalized: &str,
@@ -241,6 +305,36 @@ fn browser_matches(
     browser.matches_token(normalized, channel)
 }
 
+/// Finds the first browser in `browsers` that matches `token`, optionally constrained to `channel`.
+///
+/// The `token` is normalized (trimmed, lowercased, spaces/underscores → dashes) before matching.
+/// Matching considers a browser's `cli_name`, its `aliases`, and its kind's canonical name. If
+/// `channel` is `Some`, only browsers with that channel are considered.
+///
+/// Returns a reference to the first matching `BrowserInfo`, or `None` if no match is found.
+///
+/// # Examples
+///
+/// ```
+/// use crate::browser::{find_browser, BrowserInfo, BrowserKind, BrowserChannel};
+///
+/// let browsers = vec![BrowserInfo {
+///     id: "chrome".into(),
+///     cli_name: "chrome".into(),
+///     display_name: "Google Chrome".into(),
+///     kind: BrowserKind::Chrome,
+///     channel: BrowserChannel::Stable,
+///     aliases: vec!["google-chrome".into()],
+///     bundle_path: None,
+///     executable: None,
+///     bundle_id: None,
+///     version: None,
+///     source: None,
+/// }];
+///
+/// let found = find_browser(&browsers, "Chrome", None);
+/// assert!(found.is_some());
+/// ```
 pub fn find_browser<'a>(
     browsers: &'a [BrowserInfo],
     token: &str,

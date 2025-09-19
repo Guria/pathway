@@ -2,6 +2,19 @@ use assert_cmd::Command;
 use predicates::prelude::*;
 use tempfile::TempDir;
 
+/// Checks whether the given browser is available by running `pathway browser check <browser>`.
+///
+/// Returns `true` when the invoked command exits successfully; returns `false` if the command
+/// fails, or if locating/running the test binary or capturing output fails. Intended for use in
+/// tests to conditionally skip browser-dependent cases.
+///
+/// # Examples
+///
+/// ```
+/// let available = is_browser_available("chrome");
+/// // `available` will be true if `pathway browser check chrome` succeeds, otherwise false.
+/// let _ = available;
+/// ```
 fn is_browser_available(browser: &str) -> bool {
     Command::cargo_bin("pathway")
         .unwrap()
@@ -11,6 +24,21 @@ fn is_browser_available(browser: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Integration test that verifies `pathway launch --browser chrome --no-launch <url>`
+/// reports it would launch in Google Chrome.
+///
+/// Skips the test early if Chrome is not available on the host system.
+///
+/// # Examples
+///
+/// ```no_run
+/// // Runs the CLI and checks stderr contains the "Would launch in Google Chrome" hint.
+/// let mut cmd = assert_cmd::Command::cargo_bin("pathway").unwrap();
+/// cmd.args(["launch", "--browser", "chrome", "--no-launch", "https://example.com"])
+///     .assert()
+///     .success()
+///     .stderr(predicate::str::contains("Would launch in Google Chrome"));
+/// ```
 #[test]
 fn test_launch_with_browser() {
     if !is_browser_available("chrome") {
@@ -129,6 +157,9 @@ fn test_launch_window_options_json() {
     ));
 }
 
+/// Verifies that `pathway browser check chrome` reports Chrome is available.
+///
+/// Skips the test if Chrome isn't detected on the host system.
 #[test]
 fn test_browser_check() {
     if !is_browser_available("chrome") {
@@ -157,6 +188,19 @@ fn test_profile_list() {
         .stdout(predicate::str::contains("profiles:"));
 }
 
+/// Asserts that `pathway profile --browser chrome --format json list` emits JSON with `"action": "list-profiles"`.
+///
+/// The test is skipped early if Chrome is not available on the system.
+///
+/// # Examples
+///
+/// ```
+/// // Invoke the CLI and assert the command succeeds (example usage; mirrors the test).
+/// let mut cmd = assert_cmd::Command::cargo_bin("pathway").unwrap();
+/// cmd.args(["profile", "--browser", "chrome", "--format", "json", "list"])
+///     .assert()
+///     .success();
+/// ```
 #[test]
 fn test_profile_list_json() {
     if !is_browser_available("chrome") {

@@ -265,6 +265,29 @@ struct LaunchCommandParams {
     format: OutputFormat,
 }
 
+/// Entry point for the CLI executable.
+///
+/// Parses command-line arguments, sets up human-mode logging when requested,
+/// detects available browsers, and dispatches to the selected subcommand:
+/// Launch, Browser, or Profile. Each subcommand handles validation, JSON or
+/// human output, and may exit the process on fatal errors.
+///
+/// This function does not return a value and drives the program's top-level
+/// control flow (argument parsing → inventory detection → command dispatch).
+///
+/// # Examples
+///
+/// ```no_run
+/// // Example invocations (run from a shell):
+/// // Launch a URL with the system default browser:
+/// //   pathway-agent launch https://example.com --system-default
+///
+/// // List detected browsers in JSON:
+/// //   pathway-agent browser list --format json
+///
+/// // Show profile info for a named browser:
+/// //   pathway-agent profile --browser chrome info "Default"
+/// ```
 fn main() {
     let args = Args::parse();
 
@@ -310,6 +333,31 @@ fn main() {
     }
 }
 
+/// Validate a list of URL strings and return per-URL validation results plus a flag indicating
+/// whether any URL failed validation.
+///
+/// On success each entry is a `ValidatedUrl` (may include a non-fatal `warning`). On failure the
+/// corresponding `ValidatedUrl` will have `status == ValidationStatus::Invalid` and its `warning`
+/// will contain the validation error message. When `format == OutputFormat::Human` the function
+/// emits informational or error messages for each URL.
+///
+/// # Returns
+///
+/// A tuple `(Vec<ValidatedUrl>, bool)` where the boolean is `true` if any URL failed validation.
+///
+/// # Examples
+///
+/// ```
+/// let urls = vec![
+///     "https://example.com".to_string(),
+///     "not-a-url".to_string(),
+/// ];
+/// let (results, has_error) = validate_urls(&urls, OutputFormat::Json);
+/// assert_eq!(results.len(), 2);
+/// assert!(has_error);
+/// assert_eq!(results[0].status, ValidationStatus::Valid);
+/// assert_eq!(results[1].status, ValidationStatus::Invalid);
+/// ```
 fn validate_urls(urls: &[String], format: OutputFormat) -> (Vec<ValidatedUrl>, bool) {
     let mut results = Vec::new();
     let mut has_error = false;
@@ -357,6 +405,24 @@ fn validate_urls(urls: &[String], format: OutputFormat) -> (Vec<ValidatedUrl>, b
     (results, has_error)
 }
 
+/// Choose a BrowserInfo from the inventory unless the system default is requested.
+///
+/// Returns:
+/// - None when `system_default` is true or when no browser name is provided.
+/// - The result of `find_browser` when a browser `name` is given (which may be `Some(&BrowserInfo)` or `None` if not found).
+///
+/// The `channel` argument is forwarded to the browser lookup when a `name` is supplied.
+///
+/// # Examples
+///
+/// ```no_run
+/// // Returns None because system default was requested
+/// let chosen = select_browser(&inventory, None, None, true);
+/// assert!(chosen.is_none());
+///
+/// // When a browser name is provided, the lookup result (Some or None) is returned
+/// let chosen = select_browser(&inventory, Some("firefox"), Some(BrowserChannel::Stable), false);
+/// ```
 fn select_browser<'a>(
     inventory: &'a BrowserInventory,
     browser: Option<&str>,
@@ -372,6 +438,40 @@ fn select_browser<'a>(
     }
 }
 
+/// Validate profile/window CLI arguments and convert them to runtime options.
+///
+/// Converts `ProfileArgs` and `WindowArgs` into `ProfileOptions` and `WindowOptions`,
+/// runs platform-specific validation when a concrete `browser` is provided, and
+/// collects any warnings produced during conversion or validation.
+///
+/// Behavior:
+/// - If `browser` is `Some`, calls `validate_profile_options(browser, &profile_options, &window_options)`.
+///   Any warnings from that validation are appended to the returned warnings. Validation errors
+///   are logged with `error!` in Human format; in non-human formats the error message is added
+///   to the returned warnings.
+/// - If `browser` is `None` (system-default mode), profile- or window-related options that
+///   require an explicit browser are not validated; instead a warning is produced for each such
+///   option indicating that `--browser` is required. Warnings are also logged with `warn!` in
+///   Human format.
+///
+/// Returns a tuple `(ProfileOptions, WindowOptions, Vec<String>)` where the vector contains
+/// accumulated warning/error messages (strings). The function does not return a `Result` and
+/// never panics on validation failures — those are reported through logging and the warnings vector.
+///
+/// # Examples
+///
+/// ```
+/// // Assume types and helpers are in scope for this crate.
+/// let profile_args = ProfileArgs::default();
+/// let window_args = WindowArgs::default();
+/// let (profile_opts, window_opts, warnings) = validate_and_prepare_options(
+///     None, // use system default browser
+///     &profile_args,
+///     &window_args,
+///     OutputFormat::Human,
+/// );
+/// assert!(warnings.is_empty() || warnings.iter().all(|w| w.contains("--browser") || !w.is_empty()));
+/// ```
 fn validate_and_prepare_options(
     browser: Option<&BrowserInfo>,
     profile_args: &ProfileArgs,
@@ -426,6 +526,33 @@ fn validate_and_prepare_options(
     (profile_options, window_options, warnings)
 }
 
+/// Handle the "launch" subcommand: validate URLs, resolve the target browser (or system default),
+/// prepare profile/window options, and perform (or skip) the launch. Outputs either human-readable
+/// logs or structured JSON depending on `params.format`.
+///
+/// On URL validation or launch failure this function will print a JSON error (when JSON mode) or log
+/// an error (when human mode) and terminate the process with exit code 1. In no-launch/dry-run
+/// mode it prints a skipped message (or JSON response) and returns without launching. Successful
+/// launches print a success message or a structured JSON response containing the resolved browser,
+/// profile and window options, and the launcher command when available.
+///
+/// Side effects:
+/// - Writes to stdout (JSON responses) or to the configured logging/tracing sink (human output).
+/// - May call process::exit(1) on failures.
+/// - May invoke the platform browser launch when not in no-launch mode.
+///
+/// # Parameters
+///
+/// - `inventory`: available browser inventory and system default used to resolve targets.
+/// - `params`: aggregated parameters for the launch operation (URLs, browser/channel selection,
+///   system-default flag, profile/window args, no-launch flag, and output format).
+///
+/// # Examples
+///
+/// ```
+/// // Construct an inventory and params (omitted here) then call:
+/// // handle_launch_command(&inventory, params);
+/// ```
 fn handle_launch_command(inventory: &BrowserInventory, params: LaunchCommandParams) {
     let LaunchCommandParams {
         urls,
@@ -627,6 +754,33 @@ fn handle_launch_command(inventory: &BrowserInventory, params: LaunchCommandPara
     }
 }
 
+/// Handle the `browser` subcommand: list detected browsers or check availability of a specific browser.
+///
+/// - In `List` mode, prints either a human-readable list of detected browsers and the system default,
+///   or emits a `ListJsonResponse` JSON object when `format` is `OutputFormat::Json`.
+/// - In `Check` mode, looks up the named browser (optionally constrained to a channel) and reports its
+///   availability in the selected `format`. When `OutputFormat::Human` it prints a message; when `OutputFormat::Json`
+///   it emits a `CheckJsonResponse` JSON object.
+///
+/// Side effects:
+/// - May call `std::process::exit(1)` if a `Check` request cannot find the requested browser (both in human and JSON modes).
+///
+/// Parameters:
+/// - `inventory`: the detected browser inventory to query.
+/// - `action`: the browser action to perform (`List` or `Check`).
+/// - `format`: output format (`Human` or `Json`).
+///
+/// # Examples
+///
+/// ```
+/// # use core::cli::{handle_browser_command, BrowserAction, OutputFormat};
+/// # use pathway::BrowserInventory;
+/// // Assume `inventory` is populated by detection logic.
+/// // List browsers in human form:
+/// // handle_browser_command(&inventory, BrowserAction::List, OutputFormat::Human);
+/// // Check a browser and print JSON:
+/// // handle_browser_command(&inventory, BrowserAction::Check { browser: "chrome".into(), channel: None }, OutputFormat::Json);
+/// ```
 fn handle_browser_command(
     inventory: &BrowserInventory,
     action: BrowserAction,
@@ -742,6 +896,30 @@ fn handle_browser_command(
     }
 }
 
+/// Handle the "profile" subcommand: list or show info about browser profiles.
+///
+/// If `browser` is None, the function attempts to resolve a browser named `"chrome"`.
+/// Resolves the requested browser (honoring an optional `channel`) and then:
+/// - ProfileAction::List: discovers profiles for that browser (optionally within `user_dir`) and
+///   prints a human-readable listing or emits a JSON `ListProfilesResponse`.
+/// - ProfileAction::Info { name }: finds a specific profile by name and prints detailed info or
+///   emits a JSON `ProfileInfoResponse`.
+///
+/// Output format is chosen by `format`: `OutputFormat::Human` prints to stdout/stderr; the JSON
+/// branch prints pretty-serialized responses to stdout. On resolution failures (browser not found,
+/// profile discovery/find errors) the function logs an error in human mode and terminates the
+/// process with exit code 1.
+///
+/// Side effects:
+/// - Writes to stdout/stderr.
+/// - May call `process::exit(1)` on errors.
+///
+/// Examples
+///
+/// ```rust,no_run
+/// // Resolve inventory earlier (not shown) and call:
+/// handle_profile_command(&inventory, Some("chrome".to_string()), None, None, ProfileAction::List, OutputFormat::Human);
+/// ```
 fn handle_profile_command(
     inventory: &BrowserInventory,
     browser: Option<String>,
@@ -858,6 +1036,35 @@ fn handle_profile_command(
     }
 }
 
+/// Convert CLI profile arguments into a runtime ProfileOptions.
+///
+/// Chooses a ProfileType based on ProfileArgs:
+/// - If `temp_profile` is set, attempts to create a temporary profile directory; on failure falls back to `Default` and appends a warning.
+/// - If `user_dir` is provided, attempts to prepare that custom directory; on failure falls back to `Default` and appends a warning.
+/// - If `guest` is set, returns `Guest`.
+/// - If a named `profile` is provided, returns `Named(name)`.
+/// - Otherwise returns `Default`.
+///
+/// The function may have side effects: creating a temporary profile directory via `ProfileManager::create_temp_profile`
+/// or preparing a custom directory via `ProfileManager::prepare_custom_directory`. Any user-visible issues encountered
+/// while performing those operations are appended to the provided `warnings` vector.
+///
+/// Returns a `ProfileOptions` with the selected `ProfileType` and an empty `custom_args` list.
+///
+/// # Examples
+///
+/// ```
+/// let mut warnings = Vec::new();
+/// let args = ProfileArgs {
+///     temp_profile: false,
+///     user_dir: None,
+///     guest: false,
+///     profile: None,
+/// };
+/// let opts = convert_profile_args(&args, &mut warnings);
+/// assert!(matches!(opts.profile_type, ProfileType::Default));
+/// assert!(warnings.is_empty());
+/// ```
 fn convert_profile_args(profile_args: &ProfileArgs, warnings: &mut Vec<String>) -> ProfileOptions {
     let profile_type = if profile_args.temp_profile {
         match ProfileManager::create_temp_profile() {
@@ -899,6 +1106,18 @@ fn convert_profile_args(profile_args: &ProfileArgs, warnings: &mut Vec<String>) 
     }
 }
 
+/// Convert CLI window argument flags into a WindowOptions value used for launches.
+///
+/// The returned `WindowOptions` mirrors the `new_window`, `incognito`, and `kiosk` flags
+/// from the provided `WindowArgs`.
+///
+/// # Examples
+///
+/// ```
+/// let args = WindowArgs { new_window: true, incognito: false, kiosk: false };
+/// let opts = convert_window_args(&args);
+/// assert!(opts.new_window && !opts.incognito && !opts.kiosk);
+/// ```
 fn convert_window_args(window_args: &WindowArgs) -> WindowOptions {
     WindowOptions {
         new_window: window_args.new_window,
@@ -909,6 +1128,25 @@ fn convert_window_args(window_args: &WindowArgs) -> WindowOptions {
 
 // Helper implementations
 impl BrowserJson {
+    /// Create a BrowserJson representation from a detected BrowserInfo.
+    ///
+    /// The returned JSON object copies the CLI-visible name, canonical channel name,
+    /// a filesystem path (prefers bundle_path, falls back to executable), bundle ID,
+    /// and whether this browser is the system default.
+    ///
+    /// # Parameters
+    ///
+    /// - `info`: browser discovery result; `channel` is used via its `canonical_name()`
+    ///   and either `bundle_path` or `executable` is selected for `path`.
+    /// - `is_default`: marks the resulting JSON as the system default browser when true.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// // Given a `BrowserInfo` named `info` and a boolean `is_default`:
+    /// let json = BrowserJson::from_browser(&info, is_default);
+    /// println!("{}", json.name);
+    /// ```
     fn from_browser(info: &BrowserInfo, is_default: bool) -> Self {
         BrowserJson {
             name: info.cli_name.clone(),
@@ -923,6 +1161,21 @@ impl BrowserJson {
         }
     }
 
+    /// Create a BrowserJson representing the system default browser.
+    ///
+    /// Converts a SystemDefaultBrowser into the JSON-friendly BrowserJson:
+    /// - uses the system display name as `name`
+    /// - maps an optional `channel` to its canonical name string when present
+    /// - maps an optional `path` to a display string when present
+    /// - leaves `bundle_id` as `None` and sets `is_default` to `true`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// // Given a resolved `sys_default` value:
+    /// let json = BrowserJson::from_system_default(&sys_default);
+    /// assert!(json.is_default);
+    /// ```
     fn from_system_default(default: &SystemDefaultBrowser) -> Self {
         BrowserJson {
             name: default.display_name.clone(),
@@ -937,6 +1190,31 @@ impl BrowserJson {
 }
 
 impl ProfileJson {
+    /// Build a JSON-serializable representation of the given ProfileOptions.
+    ///
+    /// The returned `ProfileJson` contains:
+    /// - `profile_type`: a string label ("default", "named", "custom", "temporary", or "guest"),
+    /// - `name`: present only for `ProfileType::Named`,
+    /// - `path`: present for `ProfileType::CustomDirectory` and `ProfileType::Temporary` (stringified via `Display`).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use pathway::ProfileOptions;
+    /// use pathway::ProfileType;
+    ///
+    /// // Named profile
+    /// let opts = ProfileOptions { profile_type: ProfileType::Named("work".into()), custom_args: vec![] };
+    /// let json = crate::ProfileJson::from_profile_options(&opts);
+    /// assert_eq!(json.profile_type, "named");
+    /// assert_eq!(json.name.as_deref(), Some("work"));
+    ///
+    /// // Default profile
+    /// let opts = ProfileOptions { profile_type: ProfileType::Default, custom_args: vec![] };
+    /// let json = crate::ProfileJson::from_profile_options(&opts);
+    /// assert_eq!(json.profile_type, "default");
+    /// assert!(json.name.is_none() && json.path.is_none());
+    /// ```
     fn from_profile_options(profile_opts: &ProfileOptions) -> Self {
         match &profile_opts.profile_type {
             ProfileType::Default => ProfileJson {
@@ -969,6 +1247,20 @@ impl ProfileJson {
 }
 
 impl WindowOptionsJson {
+    /// Create a JSON-serializable representation of window options.
+    ///
+    /// Converts a Pathway `WindowOptions` into the module's `WindowOptionsJson` shape
+    /// by copying the `new_window`, `incognito`, and `kiosk` flags.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let opts = WindowOptions { new_window: true, incognito: false, kiosk: false };
+    /// let json = WindowOptionsJson::from_window_options(&opts);
+    /// assert_eq!(json.new_window, true);
+    /// assert_eq!(json.incognito, false);
+    /// assert_eq!(json.kiosk, false);
+    /// ```
     fn from_window_options(window_opts: &WindowOptions) -> Self {
         WindowOptionsJson {
             new_window: window_opts.new_window,
@@ -978,6 +1270,20 @@ impl WindowOptionsJson {
     }
 }
 
+/// Returns a short human-readable description of the selected profile option suitable for appending
+/// to a launch message (e.g., " with profile 'name'", " in guest mode").
+///
+/// Examples
+///
+/// ```no_run
+/// use crate::{get_profile_description, ProfileOptions, ProfileType};
+///
+/// let def = ProfileOptions { profile_type: ProfileType::Default, ..Default::default() };
+/// assert_eq!(get_profile_description(&def), "");
+///
+/// let named = ProfileOptions { profile_type: ProfileType::Named("work".into()), ..Default::default() };
+/// assert_eq!(get_profile_description(&named), " with profile 'work'");
+/// ```
 fn get_profile_description(profile_opts: &ProfileOptions) -> String {
     match &profile_opts.profile_type {
         ProfileType::Default => String::new(),
