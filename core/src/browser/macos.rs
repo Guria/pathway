@@ -404,6 +404,7 @@ fn resolve_candidate(candidate: &MacBrowserCandidate) -> Option<BrowserInfo> {
                     .collect(),
                 bundle_path: Some(bundle_path),
                 executable: Some(exec_path),
+                bundle_id: candidate.bundle_ids.first().map(|&id| id.to_string()),
                 version: None,
                 source: Some("macos".to_string()),
             });

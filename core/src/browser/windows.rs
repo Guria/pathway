@@ -290,6 +290,7 @@ fn resolve_candidate(candidate: &WindowsBrowserCandidate) -> Option<BrowserInfo>
                         .collect(),
                     bundle_path: path.parent().map(|p| p.to_path_buf()),
                     executable: Some(path.clone()),
+                    bundle_id: None,
                     version: None,
                     source: Some("windows".to_string()),
                 });

@@ -101,6 +101,8 @@ pub struct BrowserInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub executable: Option<PathBuf>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub bundle_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
@@ -194,9 +196,7 @@ pub fn detect_inventory() -> BrowserInventory {
 
 fn deduplicate(browsers: &mut Vec<BrowserInfo>) {
     let mut seen: HashSet<String> = HashSet::new();
-    browsers.retain(|browser| {
-        seen.insert(browser.cli_name.clone())
-    });
+    browsers.retain(|browser| seen.insert(browser.cli_name.clone()));
 }
 
 #[derive(Debug, Clone, Serialize)]

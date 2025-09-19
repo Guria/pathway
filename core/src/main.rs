@@ -82,6 +82,8 @@ struct BrowserJson {
     channel: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    bundle_id: Option<String>,
     is_default: bool,
 }
 
@@ -120,6 +122,7 @@ impl BrowserJson {
                 .as_ref()
                 .or(info.executable.as_ref())
                 .map(|p| p.display().to_string()),
+            bundle_id: info.bundle_id.clone(),
             is_default,
         }
     }
@@ -131,6 +134,7 @@ impl BrowserJson {
                 .channel
                 .map(|channel| channel.canonical_name().to_string()),
             path: default.path.as_ref().map(|p| p.display().to_string()),
+            bundle_id: None,
             is_default: true,
         }
     }
@@ -403,12 +407,23 @@ fn handle_list_browsers(inventory: &BrowserInventory, format: OutputFormat) {
                         .or(browser.executable.as_ref())
                         .map(|p| p.display().to_string())
                         .unwrap_or_else(|| "(unknown path)".to_string());
-                    println!(
-                        "  {} ({}) - {}",
-                        browser.cli_name,
-                        browser.channel.canonical_name(),
-                        path
-                    );
+
+                    if let Some(bundle_id) = &browser.bundle_id {
+                        println!(
+                            "  {} ({}) - {} [{}]",
+                            browser.cli_name,
+                            browser.channel.canonical_name(),
+                            path,
+                            bundle_id
+                        );
+                    } else {
+                        println!(
+                            "  {} ({}) - {}",
+                            browser.cli_name,
+                            browser.channel.canonical_name(),
+                            path
+                        );
+                    }
                 }
             }
             println!("System default: {}", inventory.system_default.display_name);
@@ -435,16 +450,29 @@ fn handle_check_browser(
     match format {
         OutputFormat::Human => {
             if let Some(info) = result {
-                println!(
-                    "Browser '{}' ({}) is available at {}",
-                    info.cli_name,
-                    info.channel.canonical_name(),
-                    info.bundle_path
-                        .as_ref()
-                        .or(info.executable.as_ref())
-                        .map(|p| p.display().to_string())
-                        .unwrap_or_else(|| "(unknown path)".to_string())
-                );
+                let path = info
+                    .bundle_path
+                    .as_ref()
+                    .or(info.executable.as_ref())
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|| "(unknown path)".to_string());
+
+                if let Some(bundle_id) = &info.bundle_id {
+                    println!(
+                        "Browser '{}' ({}) is available at {} [{}]",
+                        info.cli_name,
+                        info.channel.canonical_name(),
+                        path,
+                        bundle_id
+                    );
+                } else {
+                    println!(
+                        "Browser '{}' ({}) is available at {}",
+                        info.cli_name,
+                        info.channel.canonical_name(),
+                        path
+                    );
+                }
             } else {
                 println!(
                     "Browser '{}' not found. Available browsers: {}",

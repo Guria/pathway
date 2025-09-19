@@ -367,6 +367,7 @@ fn resolve_candidate(candidate: &LinuxBrowserCandidate) -> Option<BrowserInfo> {
                     .collect(),
                 bundle_path: exec_path.parent().map(|p| p.to_path_buf()),
                 executable: Some(exec_path.clone()),
+                bundle_id: None,
                 version: None,
                 source: Some("linux".to_string()),
             });
