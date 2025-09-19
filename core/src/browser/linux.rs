@@ -47,8 +47,9 @@ pub fn detect_browsers() -> Vec<BrowserInfo> {
 ///
 /// # Examples
 ///
-/// ```
-/// use pathway::browser::detect_inventory;
+/// ```no_run
+/// use pathway::detect_inventory;
+///
 /// let inventory = detect_inventory();
 /// let sys = &inventory.system_default;
 /// println!("Default browser: {} ({})", sys.display_name, sys.identifier);
@@ -162,18 +163,17 @@ pub fn launch_with_profile(
             command.stdout(Stdio::null());
             command.stderr(Stdio::null());
 
+            let all_args: Vec<String> = command
+                .get_args()
+                .map(|s| s.to_string_lossy().to_string())
+                .collect();
             let log_message = if has_profile_args {
                 "Launching browser with profile"
             } else {
                 "Launching browser"
             };
-            debug!(program = %exec.display(), args = ?urls, "{}", log_message);
+            debug!(program = %exec.display(), args = ?all_args, "{}", log_message);
             command.spawn()?;
-
-            let all_args: Vec<String> = command
-                .get_args()
-                .map(|s| s.to_string_lossy().to_string())
-                .collect();
 
             let cmd = LaunchCommand {
                 program: exec.to_path_buf(),
@@ -210,7 +210,11 @@ pub fn launch_with_profile(
             let cmd = LaunchCommand {
                 program: PathBuf::from("xdg-open"),
                 args: urls.to_vec(),
-                display: format!("xdg-open {}", urls.join(" ")),
+                display: urls
+                    .iter()
+                    .map(|u| format!("xdg-open {}", u))
+                    .collect::<Vec<_>>()
+                    .join(" && "),
                 is_system_default: true,
             };
 

@@ -39,8 +39,13 @@ pub fn detect_browsers() -> Vec<BrowserInfo> {
 /// # Examples
 ///
 /// ```
-/// let sys = system_default_browser();
-/// assert!(sys.is_none());
+/// use pathway::detect_inventory;
+///
+/// let inventory = detect_inventory();
+/// let sys = &inventory.system_default;
+/// // On Windows, system default detection is not yet implemented
+/// // so this will be a fallback entry
+/// println!("Default browser: {}", sys.display_name);
 /// ```
 pub fn system_default_browser() -> Option<SystemDefaultBrowser> {
     // TODO: Implement Windows system default browser detection via registry queries
@@ -55,8 +60,8 @@ pub fn system_default_browser() -> Option<SystemDefaultBrowser> {
 ///
 /// # Examples
 ///
-/// ```
-/// use crate::browser::{LaunchTarget, windows::launch};
+/// ```no_run
+/// use pathway::{launch, LaunchTarget};
 ///
 /// let urls = vec!["https://example.com".to_string()];
 /// let _ = launch(LaunchTarget::SystemDefault, &urls);
@@ -79,12 +84,12 @@ pub fn launch(target: LaunchTarget<'_>, urls: &[String]) -> Result<LaunchOutcome
 /// # Examples
 ///
 /// ```no_run
-/// use crate::browser::windows::{launch_with_profile, LaunchTarget};
+/// use pathway::{launch_with_profile, LaunchTarget};
 ///
 /// let urls = vec!["https://example.com".to_string()];
 /// // Launch using the system default handler (no profile/window options)
 /// let outcome = launch_with_profile(LaunchTarget::SystemDefault, &urls, None, None).unwrap();
-/// println!("Launched: {:?}", outcome.command.display);
+/// println!("Launched: {}", outcome.command.display);
 /// ```
 pub fn launch_with_profile(
     target: LaunchTarget<'_>,
@@ -122,18 +127,17 @@ pub fn launch_with_profile(
             command.stdout(Stdio::null());
             command.stderr(Stdio::null());
 
+            let all_args: Vec<String> = command
+                .get_args()
+                .map(|s| s.to_string_lossy().to_string())
+                .collect();
             let log_message = if has_profile_args {
                 "Launching browser with profile"
             } else {
                 "Launching browser"
             };
-            debug!(program = %exec.display(), args = ?urls, "{}", log_message);
+            debug!(program = %exec.display(), args = ?all_args, "{}", log_message);
             command.spawn()?;
-
-            let all_args: Vec<String> = command
-                .get_args()
-                .map(|s| s.to_string_lossy().to_string())
-                .collect();
 
             // Apply Windows-specific argument quoting for display purposes
             // Windows command-line parsing rules: arguments containing spaces, tabs, or quotes
@@ -426,16 +430,12 @@ fn windows_base_dirs() -> Vec<PathBuf> {
 ///
 /// Reference: https://docs.microsoft.com/en-us/windows/win32/api/shellapi/nf-shellapi-commandlinetoargvw
 ///
-/// # Examples
-///
-/// ```
-/// assert_eq!(quote_windows_arg("simple"), "simple");
-/// assert_eq!(quote_windows_arg("has space"), "\"has space\"");
-/// assert_eq!(quote_windows_arg("has\"quote"), "\"has\\\"quote\"");
-/// assert_eq!(quote_windows_arg("path\\with\\backslash"), "path\\with\\backslash");
-/// assert_eq!(quote_windows_arg("path\\"), "path\\");
-/// assert_eq!(quote_windows_arg("path\\with space"), "\"path\\with space\"");
-/// ```
+/// This function implements Windows command-line argument quoting rules:
+/// - Simple arguments without special characters are returned unchanged
+/// - Arguments containing spaces, tabs, or quotes are wrapped in double quotes
+/// - Internal quotes are escaped as `\"`
+/// - Backslashes before quotes are doubled to prevent misinterpretation
+/// - Trailing backslashes before the closing quote are doubled
 fn quote_windows_arg(arg: &str) -> String {
     // Check if quoting is needed (contains space, tab, or quote)
     let needs_quoting = arg.is_empty() || arg.chars().any(|c| c == ' ' || c == '\t' || c == '"');
@@ -461,7 +461,6 @@ fn quote_windows_arg(arg: &str) -> String {
             '\\' => {
                 // Count consecutive backslashes
                 let mut backslash_count = 0;
-                let start = i;
                 while i < chars.len() && chars[i] == '\\' {
                     backslash_count += 1;
                     i += 1;

@@ -1,5 +1,4 @@
 use crate::browser::{BrowserInfo, BrowserKind};
-use dirs_next;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::fs;
@@ -406,44 +405,37 @@ impl ProfileManager {
         if local_state_path.exists() {
             let local_state_content = fs::read_to_string(&local_state_path)?;
             let local_state: serde_json::Value = serde_json::from_str(&local_state_content)?;
-            if let Some(profile_info) = local_state.get("profile").and_then(|p| p.get("info_cache")) {
+            if let Some(profile_info) = local_state.get("profile").and_then(|p| p.get("info_cache"))
+            {
                 if let Some(profile_obj) = profile_info.as_object() {
                     for (profile_id, profile_data) in profile_obj {
                         let profile_path = base_dir.join(profile_id);
                         if !profile_path.exists() {
                             continue;
                         }
-                        ...
+
+                        let display_name = profile_data
+                            .get("name")
+                            .and_then(|n| n.as_str())
+                            .unwrap_or(profile_id)
+                            .to_string();
+
+                        let is_default = profile_id == "Default";
+
+                        profiles.push(ProfileInfo {
+                            name: profile_id.clone(),
+                            display_name,
+                            path: profile_path,
+                            is_default,
+                            last_used: profile_data.get("active_time").and_then(|t| {
+                                t.as_str()
+                                    .map(|s| s.to_string())
+                                    .or_else(|| t.as_i64().map(|n| n.to_string()))
+                                    .or_else(|| t.as_u64().map(|n| n.to_string()))
+                            }),
+                            browser_kind: browser.kind,
+                        });
                     }
-                }
-            }
-        }
-            if let Some(profile_obj) = profile_info.as_object() {
-                for (profile_id, profile_data) in profile_obj {
-                    let profile_path = base_dir.join(profile_id);
-                    if !profile_path.exists() {
-                        continue;
-                    }
-
-                    let display_name = profile_data
-                        .get("name")
-                        .and_then(|n| n.as_str())
-                        .unwrap_or(profile_id)
-                        .to_string();
-
-                    let is_default = profile_id == "Default";
-
-                    profiles.push(ProfileInfo {
-                        name: profile_id.clone(),
-                        display_name,
-                        path: profile_path,
-                        is_default,
-                        last_used: profile_data
-                            .get("active_time")
-                            .and_then(|t| t.as_str())
-                            .map(|s| s.to_string()),
-                        browser_kind: browser.kind,
-                    });
                 }
             }
         }
@@ -920,7 +912,11 @@ impl ProfileManager {
 
         // Window management arguments
         if window_opts.incognito {
-            args.push("--incognito".to_string());
+            if browser.kind == BrowserKind::Edge {
+                args.push("--inprivate".to_string());
+            } else {
+                args.push("--incognito".to_string());
+            }
         }
         if window_opts.new_window {
             args.push("--new-window".to_string());
@@ -1084,7 +1080,7 @@ fn generate_timestamp_id() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap()
+        .unwrap_or_else(|_| std::time::Duration::from_secs(0))
         .as_nanos();
     format!("{:x}", timestamp)
 }
