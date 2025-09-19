@@ -30,6 +30,9 @@ jobs:
       - name: Get version from tag
         id: get_version
         run: |
+      - name: Get version from tag
+        id: get_version
+        run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             TAG="${{ github.event.inputs.tag }}"
             if ! echo "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
@@ -39,6 +42,12 @@ jobs:
           else
             echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
           fi
+
+      - name: Verify tag exists (workflow_dispatch)
+        if: github.event_name == 'workflow_dispatch'
+        run: gh api repos/${{ github.repository }}/git/ref/tags/${{ steps.get_version.outputs.version }} >/dev/null
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
