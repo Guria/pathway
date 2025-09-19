@@ -48,14 +48,27 @@ jobs:
           key: ${{ runner.os }}-cargo-bench-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Run benchmarks
+        id: run_benchmarks
         working-directory: ./core
+        shell: bash
         run: |
-          # Run benchmarks and save results
-          cargo bench --no-run
-          cargo bench -- --output-format bencher | tee output.txt
-          
+          set -euo pipefail
+          rm -f output.txt
+          if ls benches/*.rs >/dev/null 2>&1 || grep -q '^\[\[bench\]\]' Cargo.toml; then
+            cargo bench --no-run
+            cargo bench -- --color never | tee output.txt
+            if [ -s output.txt ] && grep -qE '(ns/iter|Benchmarking|time:)' output.txt; then
+              echo "has_results=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "has_results=false" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "No benchmark targets detected; skipping cargo bench." | tee output.txt
+            echo "has_results=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Store benchmark result
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && steps.run_benchmarks.outputs.has_results == 'true'
         uses: benchmark-action/github-action-benchmark@v1
         with:
           name: Rust Benchmark
@@ -65,7 +78,7 @@ jobs:
           auto-push: true
           
       - name: Comment on PR
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && steps.run_benchmarks.outputs.has_results == 'true'
         uses: benchmark-action/github-action-benchmark@v1
         with:
           name: Rust Benchmark
