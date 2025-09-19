@@ -2,6 +2,12 @@
 name = "pathway"
 version = "0.1.0"
 edition = "2021"
+authors = ["Pathway contributors"]
+license = "MIT OR Apache-2.0"
+description = "A lightweight URL routing agent that opens URLs in the appropriate browser/profile based on configurable rules"
+repository = "https://github.com/Guria/pathway"
+keywords = ["cli", "browser", "url", "launcher", "router"]
+categories = ["command-line-utilities"]
 publish = false
 
 [dependencies]
