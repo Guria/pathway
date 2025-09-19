@@ -171,7 +171,7 @@ fn test_browser_check() {
     cmd.args(["browser", "check", "chrome"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("is available"));
+        .stderr(predicate::str::contains("is available"));
 }
 
 #[test]
@@ -185,7 +185,7 @@ fn test_profile_list() {
     cmd.args(["profile", "--browser", "chrome", "list"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("profiles:"));
+        .stderr(predicate::str::contains("profiles:"));
 }
 
 /// Asserts that `pathway profile --browser chrome --format json list` emits JSON with `"action": "list-profiles"`.
@@ -239,7 +239,7 @@ fn test_profile_custom_dir() {
     ])
     .assert()
     .success()
-    .stdout(predicate::str::contains("profiles:"));
+    .stderr(predicate::str::contains("profiles:"));
 
     // temp_dir is automatically cleaned up when it goes out of scope
 }

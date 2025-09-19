@@ -48,11 +48,10 @@ pub fn detect_browsers() -> Vec<BrowserInfo> {
 /// # Examples
 ///
 /// ```
-/// if let Some(sys) = system_default_browser() {
-///     println!("Default browser: {} ({})", sys.display_name, sys.identifier);
-/// } else {
-///     println!("No system default browser detected");
-/// }
+/// use pathway::browser::detect_inventory;
+/// let inventory = detect_inventory();
+/// let sys = &inventory.system_default;
+/// println!("Default browser: {} ({})", sys.display_name, sys.identifier);
 /// ```
 pub fn system_default_browser() -> Option<SystemDefaultBrowser> {
     if let Some(entry) = query_default_desktop_entry() {
@@ -99,7 +98,7 @@ pub fn system_default_browser() -> Option<SystemDefaultBrowser> {
 /// # Examples
 ///
 /// ```no_run
-/// use crate::browser::{launch, LaunchTarget};
+/// use pathway::browser::{launch, LaunchTarget};
 ///
 /// let urls = vec!["https://example.com".to_string()];
 /// // Launch using the system default browser
@@ -120,8 +119,8 @@ pub fn launch(target: LaunchTarget<'_>, urls: &[String]) -> Result<LaunchOutcome
 ///
 /// ```
 /// # use std::path::PathBuf;
-/// # use crate::browser::LaunchTarget;
-/// # use crate::browser::launch_with_profile;
+/// # use pathway::browser::LaunchTarget;
+/// # use pathway::browser::launch_with_profile;
 /// // Open two URLs with the system default browser
 /// let urls = vec!["https://example.com".to_string(), "https://rust-lang.org".to_string()];
 /// let outcome = launch_with_profile(LaunchTarget::SystemDefault, &urls, None, None);
@@ -145,20 +144,30 @@ pub fn launch_with_profile(
 
             let mut command = Command::new(exec);
 
-            if let (Some(profile_opts), Some(window_opts)) = (profile_opts, window_opts) {
-                let profile_args = crate::profile::ProfileManager::generate_profile_args(
-                    info,
-                    profile_opts,
-                    window_opts,
-                );
-                command.args(&profile_args);
-            }
+            let has_profile_args =
+                if let (Some(profile_opts), Some(window_opts)) = (profile_opts, window_opts) {
+                    let profile_args = crate::profile::ProfileManager::generate_profile_args(
+                        info,
+                        profile_opts,
+                        window_opts,
+                    );
+                    command.args(&profile_args);
+                    !profile_args.is_empty()
+                } else {
+                    false
+                };
 
             command.args(urls);
             command.stdin(Stdio::null());
             command.stdout(Stdio::null());
             command.stderr(Stdio::null());
-            debug!(program = %exec.display(), args = ?urls, "Launching browser with profile");
+
+            let log_message = if has_profile_args {
+                "Launching browser with profile"
+            } else {
+                "Launching browser"
+            };
+            debug!(program = %exec.display(), args = ?urls, "{}", log_message);
             command.spawn()?;
 
             let all_args: Vec<String> = command
@@ -185,8 +194,8 @@ pub fn launch_with_profile(
 
                 if let Some(window_opts) = window_opts {
                     if window_opts.new_window {
-                        // Note: xdg-open doesn't have a direct new window option
-                        // This is platform-specific behavior
+                        // xdg-open doesn't support a new window flag, so we log this limitation
+                        debug!("new-window option requested but xdg-open has no new-window flag - option ignored");
                     }
                 }
 

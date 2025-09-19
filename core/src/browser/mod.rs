@@ -111,6 +111,14 @@ pub struct BrowserInfo {
 impl BrowserInfo {
     pub fn matches_token(&self, token: &str, channel: Option<BrowserChannel>) -> bool {
         let normalized = normalize_token(token);
+        self.matches_normalized_token(&normalized, channel)
+    }
+
+    pub fn matches_normalized_token(
+        &self,
+        normalized: &str,
+        channel: Option<BrowserChannel>,
+    ) -> bool {
         if normalized.is_empty() {
             return false;
         }
@@ -129,7 +137,7 @@ impl BrowserInfo {
             return true;
         }
 
-        self.aliases.iter().any(|alias| alias == &normalized)
+        self.aliases.iter().any(|alias| alias == normalized)
     }
 
     pub fn launch_path(&self) -> Option<&Path> {
@@ -227,13 +235,14 @@ pub enum LaunchTarget<'a> {
 /// # Examples
 ///
 /// ```no_run
-/// use crate::browser::{launch, LaunchTarget};
+/// use pathway::{launch, LaunchTarget, detect_inventory};
 ///
+/// let inventory = detect_inventory();
 /// let urls = vec!["https://example.com".to_string()];
 /// let outcome = launch(LaunchTarget::SystemDefault, &urls);
 /// match outcome {
-///     Ok(o) => println!("Launched: {:?}", o.command.display),
-///     Err(e) => eprintln!("Launch failed: {:?}", e),
+///     Ok(o) => println!("Launched: {}", o.command.display),
+///     Err(e) => eprintln!("Launch failed: {}", e),
 /// }
 /// ```
 pub fn launch(target: LaunchTarget<'_>, urls: &[String]) -> Result<LaunchOutcome, LaunchError> {
@@ -257,12 +266,17 @@ pub fn launch(target: LaunchTarget<'_>, urls: &[String]) -> Result<LaunchOutcome
 ///
 /// # Examples
 ///
-/// ```
-/// use crate::browser::{launch_with_profile, LaunchTarget};
-/// // Open `https://example.com` in the system default browser without special profile/window options.
+/// ```no_run
+/// use pathway::{launch_with_profile, LaunchTarget, detect_inventory, ProfileOptions, ProfileType, WindowOptions};
+///
+/// let inventory = detect_inventory();
 /// let urls = vec!["https://example.com".to_string()];
-/// let outcome = launch_with_profile(LaunchTarget::SystemDefault, &urls, None, None);
-/// assert!(outcome.is_ok());
+/// let profile_opts = ProfileOptions {
+///     profile_type: ProfileType::Default,
+///     custom_args: Vec::new(),
+/// };
+/// let window_opts = WindowOptions::default();
+/// let outcome = launch_with_profile(LaunchTarget::SystemDefault, &urls, Some(&profile_opts), Some(&window_opts));
 /// ```
 pub fn launch_with_profile(
     target: LaunchTarget<'_>,
@@ -273,67 +287,29 @@ pub fn launch_with_profile(
     platform::launch_with_profile(target, urls, profile_opts, window_opts)
 }
 
-/// Returns true if the given `BrowserInfo` matches a normalized token and optional channel.
-///
-/// This is a small helper that delegates to `BrowserInfo::matches_token`.
-///
-/// # Examples
-///
-/// ```
-/// let browser = BrowserInfo {
-///     id: "chrome".into(),
-///     cli_name: "chrome".into(),
-///     display_name: "Chrome".into(),
-///     kind: BrowserKind::Chrome,
-///     channel: BrowserChannel::Stable,
-///     aliases: Vec::new(),
-///     bundle_path: None,
-///     executable: None,
-///     bundle_id: None,
-///     version: None,
-///     source: None,
-/// };
-///
-/// assert!(browser_matches(&browser, "chrome", None));
-/// assert!(browser_matches(&browser, "Chrome", None)); // normalized input is accepted by callers
-/// ```
-fn browser_matches(
-    browser: &BrowserInfo,
-    normalized: &str,
-    channel: Option<BrowserChannel>,
-) -> bool {
-    browser.matches_token(normalized, channel)
-}
-
 /// Finds the first browser in `browsers` that matches `token`, optionally constrained to `channel`.
 ///
 /// The `token` is normalized (trimmed, lowercased, spaces/underscores → dashes) before matching.
-/// Matching considers a browser's `cli_name`, its `aliases`, and its kind's canonical name. If
-/// `channel` is `Some`, only browsers with that channel are considered.
+/// Matching prioritizes exact CLI name matches first, then falls back to kind/alias matching.
+/// If `channel` is specified, only browsers with that channel are considered.
 ///
 /// Returns a reference to the first matching `BrowserInfo`, or `None` if no match is found.
 ///
 /// # Examples
 ///
-/// ```
-/// use crate::browser::{find_browser, BrowserInfo, BrowserKind, BrowserChannel};
+/// ```no_run
+/// use pathway::{find_browser, detect_inventory, BrowserChannel};
 ///
-/// let browsers = vec![BrowserInfo {
-///     id: "chrome".into(),
-///     cli_name: "chrome".into(),
-///     display_name: "Google Chrome".into(),
-///     kind: BrowserKind::Chrome,
-///     channel: BrowserChannel::Stable,
-///     aliases: vec!["google-chrome".into()],
-///     bundle_path: None,
-///     executable: None,
-///     bundle_id: None,
-///     version: None,
-///     source: None,
-/// }];
+/// let inventory = detect_inventory();
 ///
-/// let found = find_browser(&browsers, "Chrome", None);
-/// assert!(found.is_some());
+/// // Find Chrome stable
+/// let chrome = find_browser(&inventory.browsers, "chrome", None);
+///
+/// // Find Chrome canary specifically  
+/// let canary = find_browser(&inventory.browsers, "chrome", Some(BrowserChannel::Canary));
+///
+/// // Find by alias
+/// let chrome_alias = find_browser(&inventory.browsers, "google-chrome", None);
 /// ```
 pub fn find_browser<'a>(
     browsers: &'a [BrowserInfo],
@@ -342,16 +318,22 @@ pub fn find_browser<'a>(
 ) -> Option<&'a BrowserInfo> {
     let normalized = normalize_token(token);
 
-    if let Some(browser) = browsers
-        .iter()
-        .find(|browser| browser_matches(browser, &normalized, channel))
-    {
+    // First, try to find an exact CLI name match
+    if let Some(browser) = browsers.iter().find(|browser| {
+        if let Some(requested) = channel {
+            if requested != browser.channel {
+                return false;
+            }
+        }
+        normalized == browser.cli_name
+    }) {
         return Some(browser);
     }
 
+    // Then fall back to kind/alias matching using the already normalized token
     browsers
         .iter()
-        .find(|browser| browser.matches_token(&normalized, channel))
+        .find(|browser| browser.matches_normalized_token(&normalized, channel))
 }
 
 pub fn available_tokens(browsers: &[BrowserInfo]) -> Vec<String> {

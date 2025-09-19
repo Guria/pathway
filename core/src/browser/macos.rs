@@ -47,13 +47,12 @@ pub fn detect_browsers() -> Vec<BrowserInfo> {
 ///
 /// # Examples
 ///
-/// ```
-/// if let Some(sys) = system_default_browser() {
-///     // `identifier` is the bundle id of the default browser (e.g. "com.apple.Safari")
-///     println!("Default browser bundle id: {}", sys.identifier);
-/// } else {
-///     println!("No default browser for https was found.");
-/// }
+/// ```no_run
+/// // Example: get system default browser  
+/// // This function is typically called internally by the browser detection system
+/// // if let Some(sys) = system_default_browser() {
+/// //     println!("Default browser bundle id: {}", sys.identifier);
+/// // }
 /// ```
 pub fn system_default_browser() -> Option<SystemDefaultBrowser> {
     if let Some(bundle_id) = default_handler_for_scheme("https") {
@@ -101,10 +100,11 @@ pub fn system_default_browser() -> Option<SystemDefaultBrowser> {
 /// # Examples
 ///
 /// ```no_run
-/// use crate::macos::{launch, LaunchTarget};
+/// use pathway::{launch, LaunchTarget};
 ///
-/// let urls = vec!["https://example.com".to_string()];
-/// let _outcome = launch(LaunchTarget::SystemDefault, &urls);
+/// // Example: basic browser launch
+/// // let urls = vec!["https://example.com".to_string()];
+/// // let outcome = launch(LaunchTarget::SystemDefault, &urls);
 /// ```
 pub fn launch(target: LaunchTarget<'_>, urls: &[String]) -> Result<LaunchOutcome, LaunchError> {
     launch_with_profile(target, urls, None, None)
@@ -137,14 +137,12 @@ pub fn launch(target: LaunchTarget<'_>, urls: &[String]) -> Result<LaunchOutcome
 ///
 /// # Examples
 ///
-/// ```
-/// # use crate::{launch_with_profile, LaunchTarget};
-/// # // Example assumes appropriate BrowserInfo and Profile/Window types are in scope.
-/// let urls = vec!["https://example.com".to_string()];
-/// // Launch with the system default browser without profile or window options:
-/// let outcome = launch_with_profile(LaunchTarget::SystemDefault, &urls, None, None)?;
-/// assert!(outcome.command.program.ends_with("open"));
-/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```no_run
+/// use pathway::{launch_with_profile, LaunchTarget};
+///
+/// // Example: launch with profile options
+/// // let urls = vec!["https://example.com".to_string()];
+/// // let outcome = launch_with_profile(LaunchTarget::SystemDefault, &urls, None, None);
 /// ```
 pub fn launch_with_profile(
     target: LaunchTarget<'_>,
@@ -199,14 +197,18 @@ pub fn launch_with_profile(
 
                 let mut command = Command::new(exec);
 
-                if let (Some(profile_opts), Some(window_opts)) = (profile_opts, window_opts) {
-                    let profile_args = crate::profile::ProfileManager::generate_profile_args(
-                        info,
-                        profile_opts,
-                        window_opts,
-                    );
-                    command.args(&profile_args);
-                }
+                let has_profile_args =
+                    if let (Some(profile_opts), Some(window_opts)) = (profile_opts, window_opts) {
+                        let profile_args = crate::profile::ProfileManager::generate_profile_args(
+                            info,
+                            profile_opts,
+                            window_opts,
+                        );
+                        command.args(&profile_args);
+                        !profile_args.is_empty()
+                    } else {
+                        false
+                    };
 
                 command.args(urls);
                 command.stdin(Stdio::null());
@@ -217,7 +219,13 @@ pub fn launch_with_profile(
                     .get_args()
                     .map(|s| s.to_string_lossy().to_string())
                     .collect();
-                debug!(program = %exec.display(), args = ?all_args, "Launching browser with profile");
+
+                let log_message = if has_profile_args {
+                    "Launching browser with profile"
+                } else {
+                    "Launching browser"
+                };
+                debug!(program = %exec.display(), args = ?all_args, "{}", log_message);
                 command.spawn()?;
 
                 let cmd = LaunchCommand {

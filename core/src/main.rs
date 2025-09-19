@@ -569,22 +569,7 @@ fn handle_launch_command(inventory: &BrowserInventory, params: LaunchCommandPara
     let normalized_urls: Vec<String> = results.iter().map(|url| url.normalized.clone()).collect();
 
     if has_error {
-        if format == OutputFormat::Json {
-            let response = LaunchJsonResponse {
-                action: "launch",
-                status: "error",
-                urls: normalized_urls.clone(),
-                url: normalized_urls.first().cloned(),
-                validated: results.clone(),
-                warnings: None,
-                browser: None,
-                profile: None,
-                window_options: None,
-                command: None,
-                message: Some("URL validation failed".to_string()),
-            };
-            println!("{}", serde_json::to_string_pretty(&response).unwrap());
-        }
+        handle_url_validation_error(&normalized_urls, &results, format);
         process::exit(1);
     }
 
@@ -596,22 +581,13 @@ fn handle_launch_command(inventory: &BrowserInventory, params: LaunchCommandPara
         system_default,
     );
 
-    let mut additional_warnings = Vec::new();
-    if browser.is_some() && selected_browser.is_none() {
-        let mut warning = format!("Browser '{}' not found", browser.as_deref().unwrap());
-        if let Some(channel) = requested_channel {
-            warning.push_str(&format!(" (channel: {})", channel.canonical_name()));
-        }
-        warning.push_str(&format!(
-            ". Available browsers: {}",
-            available_tokens(&inventory.browsers).join(", ")
-        ));
-
-        if format == OutputFormat::Human {
-            warn!("{}", warning);
-        }
-        additional_warnings.push(warning);
-    }
+    let additional_warnings = generate_browser_warnings(
+        &browser,
+        selected_browser,
+        requested_channel,
+        inventory,
+        format,
+    );
 
     let (profile_options, window_options, mut warnings) =
         validate_and_prepare_options(selected_browser, &profile_args, &window_args, format);
@@ -623,63 +599,72 @@ fn handle_launch_command(inventory: &BrowserInventory, params: LaunchCommandPara
         .unwrap_or(LaunchTarget::SystemDefault);
 
     if no_launch {
-        if format == OutputFormat::Human {
-            if let Some(browser) = selected_browser {
-                let profile_info = get_profile_description(&profile_options);
-                info!(
-                    "Launch skipped (--no-launch). Would launch in {}{}",
-                    browser.display_name.as_str(),
-                    profile_info
-                );
-            } else {
-                info!(
-                    "Launch skipped (--no-launch). Would launch in {}",
-                    inventory.system_default.display_name.as_str()
-                );
-            }
-        } else {
-            let browser_json = selected_browser
-                .map(|info| BrowserJson::from_browser(info, false))
-                .unwrap_or_else(|| BrowserJson::from_system_default(&inventory.system_default));
-
-            let response = LaunchJsonResponse {
-                action: "launch",
-                status: "skipped",
-                urls: normalized_urls.clone(),
-                url: normalized_urls.first().cloned(),
-                validated: results.clone(),
-                warnings: if warnings.is_empty() {
-                    None
-                } else {
-                    Some(warnings.clone())
-                },
-                browser: Some(browser_json),
-                profile: Some(ProfileJson::from_profile_options(&profile_options)),
-                window_options: Some(WindowOptionsJson::from_window_options(&window_options)),
-                command: None,
-                message: Some("Launch skipped (--no-launch)".to_string()),
-            };
-            println!("{}", serde_json::to_string_pretty(&response).unwrap());
-        }
+        let response_data = LaunchResponseData {
+            selected_browser,
+            inventory,
+            normalized_urls: &normalized_urls,
+            results: &results,
+            warnings: &warnings,
+            format,
+        };
+        handle_no_launch_response(&profile_options, &window_options, response_data);
         return;
     }
 
-    let (profile_opts, window_opts) = if selected_browser.is_some() {
-        (Some(&profile_options), Some(&window_options))
+    let response_data = LaunchResponseData {
+        selected_browser,
+        inventory,
+        normalized_urls: &normalized_urls,
+        results: &results,
+        warnings: &warnings,
+        format,
+    };
+    execute_launch_and_respond(
+        launch_target,
+        &profile_options,
+        &window_options,
+        response_data,
+    );
+}
+
+/// Response data for browser launch operations
+struct LaunchResponseData<'a> {
+    selected_browser: Option<&'a BrowserInfo>,
+    inventory: &'a BrowserInventory,
+    normalized_urls: &'a [String],
+    results: &'a [ValidatedUrl],
+    warnings: &'a [String],
+    format: OutputFormat,
+}
+
+/// Execute the browser launch and handle the response
+fn execute_launch_and_respond(
+    launch_target: LaunchTarget,
+    profile_options: &ProfileOptions,
+    window_options: &WindowOptions,
+    response_data: LaunchResponseData,
+) {
+    let (profile_opts, window_opts) = if response_data.selected_browser.is_some() {
+        (Some(profile_options), Some(window_options))
     } else {
         (None, None)
     };
 
-    match launch_with_profile(launch_target, &normalized_urls, profile_opts, window_opts) {
+    match launch_with_profile(
+        launch_target,
+        response_data.normalized_urls,
+        profile_opts,
+        window_opts,
+    ) {
         Ok(outcome) => {
-            if format == OutputFormat::Human {
-                if let Some(browser) = selected_browser {
-                    let profile_info = get_profile_description(&profile_options);
+            if response_data.format == OutputFormat::Human {
+                if let Some(browser) = response_data.selected_browser {
+                    let profile_info = get_profile_description(profile_options);
                     info!(
                         "Launching in {}{}: {}",
                         browser.display_name,
                         profile_info,
-                        normalized_urls.join(", ")
+                        response_data.normalized_urls.join(", ")
                     );
                 } else {
                     let name = outcome
@@ -687,7 +672,11 @@ fn handle_launch_command(inventory: &BrowserInventory, params: LaunchCommandPara
                         .as_ref()
                         .map(|b| b.display_name.as_str())
                         .unwrap_or("system default browser");
-                    info!("Launching in {}: {}", name, normalized_urls.join(", "));
+                    info!(
+                        "Launching in {}: {}",
+                        name,
+                        response_data.normalized_urls.join(", ")
+                    );
                 }
             } else {
                 let browser_json = outcome
@@ -704,17 +693,17 @@ fn handle_launch_command(inventory: &BrowserInventory, params: LaunchCommandPara
                 let response = LaunchJsonResponse {
                     action: "launch",
                     status: "success",
-                    urls: normalized_urls.clone(),
-                    url: normalized_urls.first().cloned(),
-                    validated: results.clone(),
-                    warnings: if warnings.is_empty() {
+                    urls: response_data.normalized_urls.to_vec(),
+                    url: response_data.normalized_urls.first().cloned(),
+                    validated: response_data.results.to_vec(),
+                    warnings: if response_data.warnings.is_empty() {
                         None
                     } else {
-                        Some(warnings)
+                        Some(response_data.warnings.to_vec())
                     },
                     browser: browser_json,
-                    profile: Some(ProfileJson::from_profile_options(&profile_options)),
-                    window_options: Some(WindowOptionsJson::from_window_options(&window_options)),
+                    profile: Some(ProfileJson::from_profile_options(profile_options)),
+                    window_options: Some(WindowOptionsJson::from_window_options(window_options)),
                     command: Some(outcome.command.clone()),
                     message: None,
                 };
@@ -723,27 +712,32 @@ fn handle_launch_command(inventory: &BrowserInventory, params: LaunchCommandPara
         }
         Err(err) => {
             let message = format!("Failed to launch browser: {}", err);
-            if format == OutputFormat::Human {
+            if response_data.format == OutputFormat::Human {
                 error!("{}", message);
             } else {
-                let browser_json = selected_browser
+                let browser_json = response_data
+                    .selected_browser
                     .map(|info| BrowserJson::from_browser(info, false))
-                    .or_else(|| Some(BrowserJson::from_system_default(&inventory.system_default)));
+                    .or_else(|| {
+                        Some(BrowserJson::from_system_default(
+                            &response_data.inventory.system_default,
+                        ))
+                    });
 
                 let response = LaunchJsonResponse {
                     action: "launch",
                     status: "error",
-                    urls: normalized_urls.clone(),
-                    url: normalized_urls.first().cloned(),
-                    validated: results.clone(),
-                    warnings: if warnings.is_empty() {
+                    urls: response_data.normalized_urls.to_vec(),
+                    url: response_data.normalized_urls.first().cloned(),
+                    validated: response_data.results.to_vec(),
+                    warnings: if response_data.warnings.is_empty() {
                         None
                     } else {
-                        Some(warnings)
+                        Some(response_data.warnings.to_vec())
                     },
                     browser: browser_json,
-                    profile: Some(ProfileJson::from_profile_options(&profile_options)),
-                    window_options: Some(WindowOptionsJson::from_window_options(&window_options)),
+                    profile: Some(ProfileJson::from_profile_options(profile_options)),
+                    window_options: Some(WindowOptionsJson::from_window_options(window_options)),
                     command: None,
                     message: Some(message.clone()),
                 };
@@ -789,9 +783,9 @@ fn handle_browser_command(
     match action {
         BrowserAction::List => match format {
             OutputFormat::Human => {
-                println!("Detected browsers:");
+                eprintln!("Detected browsers:");
                 if inventory.browsers.is_empty() {
-                    println!("  (none)");
+                    eprintln!("  (none)");
                 } else {
                     for browser in &inventory.browsers {
                         let path = browser
@@ -802,7 +796,7 @@ fn handle_browser_command(
                             .unwrap_or_else(|| "(unknown path)".to_string());
 
                         if let Some(bundle_id) = &browser.bundle_id {
-                            println!(
+                            eprintln!(
                                 "  {} ({}) - {} [{}]",
                                 browser.cli_name,
                                 browser.channel.canonical_name(),
@@ -810,7 +804,7 @@ fn handle_browser_command(
                                 bundle_id
                             );
                         } else {
-                            println!(
+                            eprintln!(
                                 "  {} ({}) - {}",
                                 browser.cli_name,
                                 browser.channel.canonical_name(),
@@ -819,7 +813,7 @@ fn handle_browser_command(
                         }
                     }
                 }
-                println!("System default: {}", inventory.system_default.display_name);
+                eprintln!("System default: {}", inventory.system_default.display_name);
             }
             OutputFormat::Json => {
                 let response = ListJsonResponse {
@@ -845,7 +839,7 @@ fn handle_browser_command(
                             .unwrap_or_else(|| "(unknown path)".to_string());
 
                         if let Some(bundle_id) = &info.bundle_id {
-                            println!(
+                            eprintln!(
                                 "Browser '{}' ({}) is available at {} [{}]",
                                 info.cli_name,
                                 info.channel.canonical_name(),
@@ -853,7 +847,7 @@ fn handle_browser_command(
                                 bundle_id
                             );
                         } else {
-                            println!(
+                            eprintln!(
                                 "Browser '{}' ({}) is available at {}",
                                 info.cli_name,
                                 info.channel.canonical_name(),
@@ -861,7 +855,7 @@ fn handle_browser_command(
                             );
                         }
                     } else {
-                        println!(
+                        eprintln!(
                             "Browser '{}' not found. Available browsers: {}",
                             browser,
                             available_tokens(&inventory.browsers).join(", ")
@@ -954,9 +948,9 @@ fn handle_profile_command(
             match ProfileManager::discover_profiles_in_directory(browser, custom_dir) {
                 Ok(profiles) => {
                     if format == OutputFormat::Human {
-                        println!("{} profiles:", browser.display_name);
+                        eprintln!("{} profiles:", browser.display_name);
                         if profiles.is_empty() {
-                            println!("  (none)");
+                            eprintln!("  (none)");
                         } else {
                             for profile in &profiles {
                                 let default_marker =
@@ -976,7 +970,7 @@ fn handle_profile_command(
                                     String::new()
                                 };
 
-                                println!(
+                                eprintln!(
                                     "  {}{}{}{}",
                                     profile.display_name, dir_info, default_marker, last_used
                                 );
@@ -1004,17 +998,17 @@ fn handle_profile_command(
             match ProfileManager::find_profile_in_directory(browser, &name, custom_dir) {
                 Ok(profile) => {
                     if format == OutputFormat::Human {
-                        println!("Profile: {}", profile.display_name);
-                        println!("  Name: {}", profile.name);
-                        println!("  Path: {}", profile.path.display());
-                        println!(
+                        eprintln!("Profile: {}", profile.display_name);
+                        eprintln!("  Name: {}", profile.name);
+                        eprintln!("  Path: {}", profile.path.display());
+                        eprintln!(
                             "  Default: {}",
                             if profile.is_default { "Yes" } else { "No" }
                         );
                         if let Some(last_used) = &profile.last_used {
-                            println!("  Last used: {}", last_used);
+                            eprintln!("  Last used: {}", last_used);
                         }
-                        println!("  Browser: {}", browser.display_name);
+                        eprintln!("  Browser: {}", browser.display_name);
                     } else {
                         let response = ProfileInfoResponse {
                             action: "profile-info",
@@ -1293,5 +1287,107 @@ fn get_profile_description(profile_opts: &ProfileOptions) -> String {
         }
         ProfileType::Temporary(path) => format!(" with temporary profile ({})", path.display()),
         ProfileType::Guest => " in guest mode".to_string(),
+    }
+}
+
+/// Handle URL validation errors by generating appropriate error response
+fn handle_url_validation_error(
+    normalized_urls: &[String],
+    results: &[ValidatedUrl],
+    format: OutputFormat,
+) {
+    if format == OutputFormat::Json {
+        let response = LaunchJsonResponse {
+            action: "launch",
+            status: "error",
+            urls: normalized_urls.to_vec(),
+            url: normalized_urls.first().cloned(),
+            validated: results.to_vec(),
+            warnings: None,
+            browser: None,
+            profile: None,
+            window_options: None,
+            command: None,
+            message: Some("URL validation failed".to_string()),
+        };
+        println!("{}", serde_json::to_string_pretty(&response).unwrap());
+    }
+}
+
+/// Generate browser resolution warnings
+fn generate_browser_warnings(
+    browser: &Option<String>,
+    selected_browser: Option<&BrowserInfo>,
+    requested_channel: Option<BrowserChannel>,
+    inventory: &BrowserInventory,
+    format: OutputFormat,
+) -> Vec<String> {
+    let mut warnings = Vec::new();
+
+    if browser.is_some() && selected_browser.is_none() {
+        let mut warning = format!("Browser '{}' not found", browser.as_deref().unwrap());
+        if let Some(channel) = requested_channel {
+            warning.push_str(&format!(" (channel: {})", channel.canonical_name()));
+        }
+        warning.push_str(&format!(
+            ". Available browsers: {}",
+            available_tokens(&inventory.browsers).join(", ")
+        ));
+
+        if format == OutputFormat::Human {
+            warn!("{}", warning);
+        }
+        warnings.push(warning);
+    }
+
+    warnings
+}
+
+/// Handle no-launch (dry-run) response generation
+fn handle_no_launch_response(
+    profile_options: &ProfileOptions,
+    window_options: &WindowOptions,
+    response_data: LaunchResponseData,
+) {
+    if response_data.format == OutputFormat::Human {
+        if let Some(browser) = response_data.selected_browser {
+            let profile_info = get_profile_description(profile_options);
+            info!(
+                "Launch skipped (--no-launch). Would launch in {}{}",
+                browser.display_name.as_str(),
+                profile_info
+            );
+        } else {
+            info!(
+                "Launch skipped (--no-launch). Would launch in {}",
+                response_data.inventory.system_default.display_name.as_str()
+            );
+        }
+    } else {
+        let browser_json = response_data
+            .selected_browser
+            .map(|info| BrowserJson::from_browser(info, false))
+            .unwrap_or_else(|| {
+                BrowserJson::from_system_default(&response_data.inventory.system_default)
+            });
+
+        let response = LaunchJsonResponse {
+            action: "launch",
+            status: "skipped",
+            urls: response_data.normalized_urls.to_vec(),
+            url: response_data.normalized_urls.first().cloned(),
+            validated: response_data.results.to_vec(),
+            warnings: if response_data.warnings.is_empty() {
+                None
+            } else {
+                Some(response_data.warnings.to_vec())
+            },
+            browser: Some(browser_json),
+            profile: Some(ProfileJson::from_profile_options(profile_options)),
+            window_options: Some(WindowOptionsJson::from_window_options(window_options)),
+            command: None,
+            message: Some("Launch skipped (--no-launch)".to_string()),
+        };
+        println!("{}", serde_json::to_string_pretty(&response).unwrap());
     }
 }

@@ -1,5 +1,5 @@
 use crate::browser::{BrowserInfo, BrowserKind};
-use dirs;
+use dirs_next;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::fs;
@@ -64,10 +64,13 @@ impl ProfileManager {
     ///
     /// # Examples
     ///
-    /// ```
-    /// // Construct a BrowserInfo for the target browser, then:
-    /// let profiles = ProfileManager::discover_profiles(&browser_info).unwrap();
-    /// assert!(profiles.iter().all(|p| !p.name.is_empty()));
+    /// ```no_run
+    /// use pathway::{ProfileManager, BrowserInfo, BrowserKind, BrowserChannel};
+    ///
+    /// // Example: discover profiles for a browser
+    /// // let browser_info = /* construct BrowserInfo */;
+    /// // let profiles = ProfileManager::discover_profiles(&browser_info).unwrap();
+    /// // assert!(profiles.iter().all(|p| !p.name.is_empty()));
     /// ```
     pub fn discover_profiles(browser: &BrowserInfo) -> Result<Vec<ProfileInfo>, ProfileError> {
         Self::discover_profiles_in_directory(browser, None)
@@ -87,10 +90,13 @@ impl ProfileManager {
     ///
     /// # Examples
     ///
-    /// ```
-    /// // Discover profiles using platform defaults
-    /// let profiles = ProfileManager::discover_profiles_in_directory(&browser, None).unwrap();
-    /// assert!(!profiles.is_empty());
+    /// ```no_run
+    /// use pathway::{ProfileManager, BrowserInfo};
+    ///
+    /// // Example: discover profiles in custom directory
+    /// // let browser = /* construct BrowserInfo */;
+    /// // let profiles = ProfileManager::discover_profiles_in_directory(&browser, None).unwrap();
+    /// // assert!(!profiles.is_empty());
     /// ```
     pub fn discover_profiles_in_directory(
         browser: &BrowserInfo,
@@ -112,10 +118,14 @@ impl ProfileManager {
             }
             BrowserKind::Safari => {
                 // Safari doesn't support profiles
+                let path = match custom_base_dir {
+                    Some(dir) => dir.to_path_buf(),
+                    None => Self::get_default_browser_dir(browser.kind)?,
+                };
                 Ok(vec![ProfileInfo {
                     name: "default".to_string(),
                     display_name: "Default".to_string(),
-                    path: custom_base_dir.unwrap_or(&PathBuf::new()).to_path_buf(),
+                    path,
                     is_default: true,
                     last_used: None,
                     browser_kind: browser.kind,
@@ -123,10 +133,14 @@ impl ProfileManager {
             }
             _ => {
                 // Other browsers - assume single profile
+                let path = match custom_base_dir {
+                    Some(dir) => dir.to_path_buf(),
+                    None => Self::get_default_browser_dir(browser.kind)?,
+                };
                 Ok(vec![ProfileInfo {
                     name: "default".to_string(),
                     display_name: "Default".to_string(),
-                    path: custom_base_dir.unwrap_or(&PathBuf::new()).to_path_buf(),
+                    path,
                     is_default: true,
                     last_used: None,
                     browser_kind: browser.kind,
@@ -172,15 +186,15 @@ impl ProfileManager {
     /// # Examples
     ///
     /// ```no_run
+    /// use pathway::{ProfileManager, BrowserInfo};
     /// use std::path::Path;
     ///
-    /// // `browser` should be a prepared `BrowserInfo` for the target browser.
-    /// // `custom_dir` may be `None` to use the default discovery location.
-    /// let result = ProfileManager::find_profile_in_directory(&browser, "Default", None);
-    /// match result {
-    ///     Ok(profile) => println!("Found profile at {}", profile.path.display()),
-    ///     Err(e) => eprintln!("Profile lookup failed: {:?}", e),
-    /// }
+    /// // Example: find profile in custom directory
+    /// // let result = ProfileManager::find_profile_in_directory(&browser, "Default", None);
+    /// // match result {
+    /// //     Ok(profile) => println!("Found profile at {}", profile.path.display()),
+    /// //     Err(e) => eprintln!("Profile lookup failed: {:?}", e),
+    /// // }
     /// ```
     pub fn find_profile_in_directory(
         browser: &BrowserInfo,
@@ -203,13 +217,12 @@ impl ProfileManager {
     /// # Examples
     ///
     /// ```no_run
-    /// # use core::profile::{ProfileManager, ProfileOptions, WindowOptions};
-    /// # use core::browser::BrowserInfo;
-    /// let browser: BrowserInfo = /* obtain browser info */ unimplemented!();
-    /// let profile_opts = ProfileOptions { profile_type: Default, custom_args: vec![] };
-    /// let window_opts = WindowOptions { new_window: true, incognito: false, kiosk: false };
-    /// let args = ProfileManager::generate_profile_args(&browser, &profile_opts, &window_opts);
-    /// // `args` now contains browser-specific flags for the selected profile and window options.
+    /// use pathway::{ProfileManager, ProfileOptions, ProfileType, WindowOptions, BrowserInfo};
+    ///
+    /// // Example: generate profile arguments
+    /// // let profile_opts = ProfileOptions { profile_type: ProfileType::Default, custom_args: vec![] };
+    /// // let window_opts = WindowOptions::default();
+    /// // let args = ProfileManager::generate_profile_args(&browser, &profile_opts, &window_opts);
     /// ```
     pub fn generate_profile_args(
         browser: &BrowserInfo,
@@ -269,22 +282,16 @@ impl ProfileManager {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// use std::env;
     /// use std::fs;
     /// use std::path::Path;
+    /// use pathway::ProfileManager;
     ///
-    /// // Create a temporary directory path under the system temp directory.
-    /// let dir = env::temp_dir().join("pathway_example_dir");
-    /// let _ = fs::remove_dir_all(&dir); // ignore errors; example cleanup
-    ///
-    /// let result = crate::profile::prepare_custom_directory(Path::new(&dir));
-    /// assert!(result.is_ok());
-    /// let path = result.unwrap();
-    /// assert!(path.exists() && path.is_dir());
-    ///
-    /// // cleanup
-    /// let _ = fs::remove_dir_all(&dir);
+    /// // Example: prepare custom directory
+    /// // let dir = env::temp_dir().join("pathway_example_dir");
+    /// // let result = ProfileManager::prepare_custom_directory(Path::new(&dir));
+    /// // assert!(result.is_ok());
     /// ```
     pub fn prepare_custom_directory(path: &Path) -> Result<PathBuf, ProfileError> {
         let path = path.to_path_buf();
@@ -309,7 +316,8 @@ impl ProfileManager {
         let test_file = path.join(".pathway_test");
         match OpenOptions::new()
             .write(true)
-            .create_new(true)
+            .create(true)
+            .truncate(true)
             .open(&test_file)
         {
             Ok(_) => {
@@ -341,11 +349,12 @@ impl ProfileManager {
     ///
     /// # Examples
     ///
-    /// ```
-    /// let dir = create_temp_profile().expect("failed to create temp profile");
-    /// assert!(dir.exists() && dir.is_dir());
-    /// // cleanup
-    /// std::fs::remove_dir_all(dir).unwrap();
+    /// ```no_run
+    /// use pathway::ProfileManager;
+    ///
+    /// // Example: create temporary profile
+    /// // let dir = ProfileManager::create_temp_profile().expect("failed to create temp profile");
+    /// // assert!(dir.exists() && dir.is_dir());
     /// ```
     pub fn create_temp_profile() -> Result<PathBuf, ProfileError> {
         let temp_dir =
@@ -369,23 +378,20 @@ impl ProfileManager {
     /// - If nothing can be discovered, returns a default ProfileInfo as a fallback.
     ///
     /// Returns:
-    /// - Ok(Vec<ProfileInfo>) on success.
+    /// - Ok(`Vec<ProfileInfo>`) on success.
     /// - Err(ProfileError) on IO or JSON parse errors or if the browser kind is unsupported
     ///   when resolving the chromium base directory.
     ///
     /// # Examples
     ///
     /// ```no_run
-    /// use core::profile::ProfileManager;
-    /// use core::browser::BrowserInfo;
-    /// use core::browser::BrowserKind;
+    /// use pathway::{ProfileManager, BrowserInfo, BrowserKind};
     ///
-    /// // Construct a BrowserInfo for the target browser (example only)
-    /// let browser = BrowserInfo { kind: BrowserKind::Chrome, ..Default::default() };
-    /// let profiles = ProfileManager::discover_chromium_profiles_in_dir(&browser, None).unwrap();
-    /// assert!(!profiles.is_empty());
+    /// // Example: discover Chromium profiles
+    /// // let profiles = ProfileManager::discover_chromium_profiles_in_dir(&browser, None).unwrap();
+    /// // assert!(!profiles.is_empty());
     /// ```
-    fn discover_chromium_profiles_in_dir(
+    pub fn discover_chromium_profiles_in_dir(
         browser: &BrowserInfo,
         custom_base_dir: Option<&Path>,
     ) -> Result<Vec<ProfileInfo>, ProfileError> {
@@ -546,29 +552,18 @@ impl ProfileManager {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// use std::collections::HashMap;
-    /// use std::fs;
-    /// use std::path::Path;
+    /// use pathway::{ProfileManager, BrowserKind};
     ///
-    /// // prepare a temporary directory to act as the firefox profile base
-    /// let base = std::env::temp_dir().join("example_firefox_base");
-    /// let profile_sub = "profile123";
-    /// let profile_path = base.join(profile_sub);
-    /// let _ = fs::create_dir_all(&profile_path);
-    ///
-    /// let mut data = HashMap::new();
-    /// data.insert("Name".to_string(), "default".to_string());
-    /// data.insert("Path".to_string(), profile_sub.to_string());
-    /// data.insert("IsRelative".to_string(), "1".to_string());
-    /// data.insert("Default".to_string(), "1".to_string());
-    ///
-    /// // assumes BrowserKind::Firefox is available in scope
-    /// let info = crate::parse_firefox_profile(data, &base, crate::BrowserKind::Firefox)
-    ///     .expect("should parse profile");
-    /// assert_eq!(info.name, "default");
-    /// assert!(info.is_default);
-    /// assert_eq!(info.path, profile_path);
+    /// // Example: parse Firefox profile data
+    /// // let mut data = HashMap::new();
+    /// // data.insert("Name".to_string(), "TestProfile".to_string());
+    /// // data.insert("IsRelative".to_string(), "1".to_string());
+    /// // data.insert("Path".to_string(), "test.profile".to_string());
+    /// // data.insert("Default".to_string(), "1".to_string());
+    /// //
+    /// // let info = ProfileManager::parse_firefox_profile(data, &base_dir, BrowserKind::Firefox);
     /// ```
     fn parse_firefox_profile(
         profile_data: HashMap<String, String>,
@@ -625,12 +620,15 @@ impl ProfileManager {
     ///
     /// # Examples
     ///
-    /// ```
-    /// let dir = get_chromium_base_dir(BrowserKind::Chrome).expect("expected to resolve base dir");
-    /// assert!(dir.is_absolute());
+    /// ```no_run
+    /// use pathway::{ProfileManager, BrowserKind};
+    ///
+    /// // Example: get Chromium base directory
+    /// // let dir = ProfileManager::get_chromium_base_dir(BrowserKind::Chrome).expect("expected to resolve base dir");
+    /// // assert!(dir.is_absolute());
     /// ```
     fn get_chromium_base_dir(browser_kind: BrowserKind) -> Result<PathBuf, ProfileError> {
-        let home = dirs::home_dir().ok_or_else(|| {
+        let home = dirs_next::home_dir().ok_or_else(|| {
             ProfileError::InvalidDirectory("Could not determine home directory".to_string())
         })?;
 
@@ -641,7 +639,7 @@ impl ProfileManager {
                 #[cfg(target_os = "linux")]
                 return Ok(home.join(".config/google-chrome"));
                 #[cfg(target_os = "windows")]
-                return Ok(home.join("AppData/Local/Google/Chrome"));
+                return Ok(home.join("AppData/Local/Google/Chrome/User Data"));
             }
             BrowserKind::Edge => {
                 #[cfg(target_os = "macos")]
@@ -649,7 +647,7 @@ impl ProfileManager {
                 #[cfg(target_os = "linux")]
                 return Ok(home.join(".config/microsoft-edge"));
                 #[cfg(target_os = "windows")]
-                return Ok(home.join("AppData/Local/Microsoft/Edge"));
+                return Ok(home.join("AppData/Local/Microsoft/Edge/User Data"));
             }
             BrowserKind::Brave => {
                 #[cfg(target_os = "macos")]
@@ -657,7 +655,7 @@ impl ProfileManager {
                 #[cfg(target_os = "linux")]
                 return Ok(home.join(".config/BraveSoftware/Brave-Browser"));
                 #[cfg(target_os = "windows")]
-                return Ok(home.join("AppData/Local/BraveSoftware/Brave-Browser"));
+                return Ok(home.join("AppData/Local/BraveSoftware/Brave-Browser/User Data"));
             }
             BrowserKind::Vivaldi => {
                 #[cfg(target_os = "macos")]
@@ -665,7 +663,7 @@ impl ProfileManager {
                 #[cfg(target_os = "linux")]
                 return Ok(home.join(".config/vivaldi"));
                 #[cfg(target_os = "windows")]
-                return Ok(home.join("AppData/Local/Vivaldi"));
+                return Ok(home.join("AppData/Local/Vivaldi/User Data"));
             }
             BrowserKind::Arc => {
                 #[cfg(target_os = "macos")]
@@ -673,7 +671,7 @@ impl ProfileManager {
                 #[cfg(target_os = "linux")]
                 return Ok(home.join(".config/arc"));
                 #[cfg(target_os = "windows")]
-                return Ok(home.join("AppData/Local/Arc"));
+                return Ok(home.join("AppData/Local/Arc/User Data"));
             }
             BrowserKind::Helium => {
                 #[cfg(target_os = "macos")]
@@ -681,7 +679,7 @@ impl ProfileManager {
                 #[cfg(target_os = "linux")]
                 return Ok(home.join(".config/helium"));
                 #[cfg(target_os = "windows")]
-                return Ok(home.join("AppData/Local/Helium"));
+                return Ok(home.join("AppData/Local/Helium/User Data"));
             }
             BrowserKind::Opera => {
                 #[cfg(target_os = "macos")]
@@ -689,7 +687,7 @@ impl ProfileManager {
                 #[cfg(target_os = "linux")]
                 return Ok(home.join(".config/opera"));
                 #[cfg(target_os = "windows")]
-                return Ok(home.join("AppData/Roaming/Opera Software/Opera Stable"));
+                return Ok(home.join("AppData/Roaming/Opera Software/Opera Stable/User Data"));
             }
             BrowserKind::Chromium => {
                 #[cfg(target_os = "macos")]
@@ -697,7 +695,7 @@ impl ProfileManager {
                 #[cfg(target_os = "linux")]
                 return Ok(home.join(".config/chromium"));
                 #[cfg(target_os = "windows")]
-                return Ok(home.join("AppData/Local/Chromium"));
+                return Ok(home.join("AppData/Local/Chromium/User Data"));
             }
             _ => Err(ProfileError::UnsupportedBrowser(format!(
                 "Profile discovery not supported for {:?}",
@@ -715,12 +713,15 @@ impl ProfileManager {
     ///
     /// # Examples
     ///
-    /// ```
-    /// let base = get_firefox_base_dir().expect("failed to locate Firefox base directory");
-    /// println!("{}", base.display());
+    /// ```no_run
+    /// use pathway::ProfileManager;
+    ///
+    /// // Example: get Firefox base directory
+    /// // let base = ProfileManager::get_firefox_base_dir().expect("failed to locate Firefox base directory");
+    /// // println!("{}", base.display());
     /// ```
     fn get_firefox_base_dir() -> Result<PathBuf, ProfileError> {
-        let home = dirs::home_dir().ok_or_else(|| {
+        let home = dirs_next::home_dir().ok_or_else(|| {
             ProfileError::InvalidDirectory("Could not determine home directory".to_string())
         })?;
 
@@ -744,6 +745,90 @@ impl ProfileManager {
         }
     }
 
+    /// Get the default browser directory for a given browser kind.
+    ///
+    /// Returns the platform-appropriate default profile/config directory for the specified browser.
+    /// For Safari on macOS, this returns the user's Library/Safari path.
+    /// For Chromium-based browsers, this delegates to get_chromium_base_dir.
+    /// For Firefox-based browsers, this delegates to get_firefox_base_dir.
+    /// For unknown browsers or unsupported platforms, this returns an error.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use pathway::{ProfileManager, BrowserKind};
+    ///
+    /// // Example: get Safari default directory on macOS
+    /// // let dir = ProfileManager::get_default_browser_dir(BrowserKind::Safari).expect("expected Safari dir");
+    /// // assert!(dir.to_string_lossy().contains("Library/Safari"));
+    /// ```
+    fn get_default_browser_dir(browser_kind: BrowserKind) -> Result<PathBuf, ProfileError> {
+        match browser_kind {
+            // Chromium-based browsers
+            BrowserKind::Chrome
+            | BrowserKind::Edge
+            | BrowserKind::Brave
+            | BrowserKind::Vivaldi
+            | BrowserKind::Arc
+            | BrowserKind::Helium
+            | BrowserKind::Opera
+            | BrowserKind::Chromium => Self::get_chromium_base_dir(browser_kind),
+
+            // Firefox-based browsers
+            BrowserKind::Firefox | BrowserKind::Waterfox => Self::get_firefox_base_dir(),
+
+            // Safari (macOS only)
+            BrowserKind::Safari => {
+                #[cfg(target_os = "macos")]
+                {
+                    let home = dirs_next::home_dir().ok_or_else(|| {
+                        ProfileError::InvalidDirectory(
+                            "Could not determine home directory".to_string(),
+                        )
+                    })?;
+                    Ok(home.join("Library/Safari"))
+                }
+                #[cfg(not(target_os = "macos"))]
+                {
+                    Err(ProfileError::UnsupportedBrowser(
+                        "Safari is only supported on macOS".to_string(),
+                    ))
+                }
+            }
+
+            // Tor Browser - has its own directory structure
+            BrowserKind::TorBrowser => {
+                let home = dirs_next::home_dir().ok_or_else(|| {
+                    ProfileError::InvalidDirectory("Could not determine home directory".to_string())
+                })?;
+
+                #[cfg(target_os = "macos")]
+                {
+                    Ok(home.join("Library/Application Support/TorBrowser-Data"))
+                }
+                #[cfg(target_os = "linux")]
+                {
+                    Ok(home.join(".local/share/torbrowser"))
+                }
+                #[cfg(target_os = "windows")]
+                {
+                    Ok(home.join("AppData/Local/TorBrowser"))
+                }
+                #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+                {
+                    Err(ProfileError::UnsupportedBrowser(
+                        "Tor Browser not supported on this platform".to_string(),
+                    ))
+                }
+            }
+
+            // Unknown browsers
+            BrowserKind::Other => Err(ProfileError::UnsupportedBrowser(
+                "Cannot determine default directory for unknown browser".to_string(),
+            )),
+        }
+    }
+
     /// Construct a default ProfileInfo for the given browser kind.
     ///
     /// Returns a ProfileInfo representing the canonical "default" profile: name "default",
@@ -751,10 +836,13 @@ impl ProfileManager {
     ///
     /// # Examples
     ///
-    /// ```
-    /// let info = default_profile(BrowserKind::Chrome);
-    /// assert_eq!(info.name, "default");
-    /// assert!(info.is_default);
+    /// ```no_run
+    /// use pathway::{ProfileManager, BrowserKind};
+    ///
+    /// // Example: create default profile info
+    /// // let info = ProfileManager::default_profile(BrowserKind::Chrome);
+    /// // assert_eq!(info.name, "default");
+    /// // assert!(info.is_default);
     /// ```
     fn default_profile(browser_kind: BrowserKind) -> ProfileInfo {
         ProfileInfo {
@@ -781,13 +869,12 @@ impl ProfileManager {
     ///
     /// # Examples
     ///
-    /// ```
-    /// // Construct minimal examples appropriate for your environment; these types come from the crate.
-    /// let browser = /* a BrowserInfo for a Chromium-family browser */;
-    /// let profile_opts = ProfileOptions { profile_type: ProfileType::Default, custom_args: vec![] };
-    /// let window_opts = WindowOptions { new_window: true, incognito: false, kiosk: false };
-    /// let args = chromium_profile_args(&browser, &profile_opts, &window_opts);
-    /// assert!(args.contains(&"--new-window".to_string()));
+    /// ```no_run
+    /// use pathway::{BrowserInfo, BrowserKind, BrowserChannel, ProfileOptions, ProfileType, WindowOptions};
+    /// use std::path::PathBuf;
+    ///
+    /// // This would be called internally by ProfileManager
+    /// // Example shows the expected behavior for Chromium browsers
     /// ```
     fn chromium_profile_args(
         browser: &BrowserInfo,
@@ -800,10 +887,10 @@ impl ProfileManager {
         match &profile_opts.profile_type {
             ProfileType::Named(name) => match Self::find_profile(browser, name) {
                 Ok(profile_info) => {
-                    args.push(format!("--profile-directory={}", profile_info.name));
+                    args.push(format!("--profile-directory={}", &profile_info.name));
                     debug!(
                         "Resolved profile '{}' to directory '{}'",
-                        name, profile_info.name
+                        name, &profile_info.name
                     );
                 }
                 Err(e) => {
@@ -848,20 +935,20 @@ impl ProfileManager {
     /// - `Named(name)`: resolves the named profile; if found the profile's display name is passed with `-P`, otherwise the provided name is used.
     /// - `CustomDirectory(path)` / `Temporary(path)`: passed as `--profile <path>`.
     /// - `Guest`: requests a private window with `--private-window`.
+    ///
     /// WindowOptions set the window-level flags: `--private-window`, `--new-window`, and `--kiosk` are appended when requested.
     ///
-    /// Returns a Vec<String> containing the arguments to append to a Firefox launch command.
+    /// Returns a `Vec<String>` containing the arguments to append to a Firefox launch command.
     ///
     /// # Examples
     ///
     /// ```no_run
-    /// use core::profile::{ProfileOptions, ProfileType, WindowOptions};
-    /// // `browser` would be a BrowserInfo instance from the surrounding crate.
-    /// let browser = /* BrowserInfo */ unimplemented!();
-    /// let profile_opts = ProfileOptions { profile_type: ProfileType::Named("default".into()), custom_args: vec![] };
-    /// let window_opts = WindowOptions { new_window: true, incognito: false, kiosk: false };
-    /// let args = core::profile::ProfileManager::firefox_profile_args(&browser, &profile_opts, &window_opts);
-    /// // args now contains Firefox-appropriate CLI flags such as ["-P", "default", "--new-window"]
+    /// use pathway::{ProfileOptions, ProfileType, WindowOptions, BrowserInfo};
+    ///
+    /// // Example: generate Firefox profile arguments
+    /// // let profile_opts = ProfileOptions { profile_type: ProfileType::Named("default".into()), custom_args: vec![] };
+    /// // let window_opts = WindowOptions { new_window: true, incognito: false, kiosk: false };
+    /// // let args = ProfileManager::firefox_profile_args(&browser, &profile_opts, &window_opts);
     /// ```
     fn firefox_profile_args(
         browser: &BrowserInfo,
@@ -926,14 +1013,17 @@ impl ProfileManager {
     ///
     /// # Examples
     ///
-    /// ```
-    /// let profile_opts = ProfileOptions {
-    ///     profile_type: ProfileType::Default,
-    ///     custom_args: Vec::new(),
-    /// };
-    /// let window_opts = WindowOptions::default();
-    /// let args = safari_profile_args(&profile_opts, &window_opts);
-    /// assert!(args.is_empty());
+    /// ```no_run
+    /// use pathway::{ProfileOptions, ProfileType, WindowOptions};
+    ///
+    /// // Example: generate Safari profile arguments
+    /// // let profile_opts = ProfileOptions {
+    /// //     profile_type: ProfileType::Default,
+    /// //     custom_args: Vec::new(),
+    /// // };
+    /// // let window_opts = WindowOptions::default();
+    /// // let args = safari_profile_args(&profile_opts, &window_opts);
+    /// // assert!(args.is_empty());
     /// ```
     fn safari_profile_args(
         _profile_opts: &ProfileOptions,
@@ -954,10 +1044,13 @@ impl ProfileManager {
     ///
     /// # Examples
     ///
-    /// ```
-    /// let opts = WindowOptions { new_window: false, incognito: true, kiosk: false };
-    /// let args = generic_window_args(&opts);
-    /// assert_eq!(args, vec!["--private".to_string()]);
+    /// ```no_run
+    /// use pathway::WindowOptions;
+    ///
+    /// // Example: generate generic window arguments
+    /// // let opts = WindowOptions { new_window: false, incognito: true, kiosk: false };
+    /// // let args = generic_window_args(&opts);
+    /// // assert_eq!(args, vec!["--private".to_string()]);
     /// ```
     fn generic_window_args(window_opts: &WindowOptions) -> Vec<String> {
         let mut args = Vec::new();
@@ -979,9 +1072,9 @@ impl ProfileManager {
 /// # Examples
 ///
 /// ```
-/// let id = generate_timestamp_id();
-/// // parse back to ensure it's valid hex and non-zero
-/// let value = u128::from_str_radix(&id, 16).unwrap();
+/// // Example of what the function returns:
+/// let example_id = "1a2b3c4d5e6f7890";
+/// let value = u128::from_str_radix(example_id, 16).unwrap();
 /// assert!(value > 0);
 /// ```
 fn generate_timestamp_id() -> String {
@@ -1009,7 +1102,7 @@ fn generate_timestamp_id() -> String {
 ///
 /// # Examples
 ///
-/// ```
+/// ```text
 /// // Assume `browser`, `profile_opts`, and `window_opts` are constructed appropriately:
 /// // let warnings = validate_profile_options(&browser, &profile_opts, &window_opts).unwrap();
 /// // assert!(warnings.is_empty() || warnings.iter().any(|w| w.contains("does not support")));

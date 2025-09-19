@@ -131,3 +131,22 @@ jobs:
       - name: Check licenses
         working-directory: ./core
         run: cargo deny check licenses
+
+  security-audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: Run cargo audit
+        working-directory: ./core
+        env:
+          RUSTSEC_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: cargo audit

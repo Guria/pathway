@@ -32,7 +32,7 @@ fn test_browser_list() {
     cmd.args(["browser", "list"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Detected browsers:"));
+        .stderr(predicate::str::contains("Detected browsers:"));
 }
 
 #[test]
@@ -41,7 +41,7 @@ fn test_browser_check_not_found() {
     cmd.args(["browser", "check", "definitely-not-installed"])
         .assert()
         .failure()
-        .stdout(predicate::str::contains("not found"));
+        .stderr(predicate::str::contains("not found"));
 }
 
 #[test]

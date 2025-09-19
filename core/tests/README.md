@@ -1,24 +1,20 @@
-# Test Organization for GitHub Actions
+# Test Organization
 
-The test suite has been split into two separate files to support running in different environments:
+The test suite is organized into two main files:
 
 ## Core Integration Tests (`tests/integration.rs`)
 
-Browser-agnostic tests that should run in any environment, including CI/CD:
+Browser-agnostic tests that validate core functionality:
 
 - Basic URL validation tests
 - Help command tests  
-- Browser listing (doesn't require specific browsers)
+- Browser listing
 - Error handling tests
 - System default browser warnings
 
-**Run with:** `cargo test --test integration`
+## Browser Integration Tests (`tests/browser_integration.rs`)
 
-These tests are safe to run in GitHub Actions and other CI environments where specific browsers may not be installed.
-
-## Browser-Dependent Tests (`tests/browser_integration.rs`)
-
-Tests that require specific browsers to be installed:
+Tests that work with specific browsers when available:
 
 - Chrome-specific functionality tests
 - Safari-specific functionality tests  
@@ -26,80 +22,35 @@ Tests that require specific browsers to be installed:
 - Browser profile management tests
 - Window options tests with actual browsers
 
-**Run with:** `cargo test --test browser_integration`
-
 These tests will automatically skip if the required browser is not available on the system.
-
-## Using Exclusion in Cargo
-
-You can use cargo's exclusion features to run specific test suites:
-
-### Core tests only (recommended for CI)
-```bash
-# Run unit tests + core integration tests (excludes browser tests)
-cargo test --lib --test integration
-
-# Same thing with verbose output
-cargo test --lib --test integration --verbose
-```
-
-### Browser tests only
-```bash
-# Run only browser-dependent tests
-cargo test --test browser_integration
-```
-
-### All tests except browser tests
-```bash
-# Alternative: run unit tests and core integration only
-cargo test --lib --test integration
-```
-
-## GitHub Actions Usage
-
-For GitHub Actions, the CI now uses exclusion to run reliable tests:
-
-### Basic CI (always run) - Updated
-```yaml
-- name: Run core tests
-  run: cargo test --lib --test integration --verbose
-
-- name: Run browser tests (optional)
-  run: cargo test --test browser_integration --verbose
-  continue-on-error: true  # Don't fail CI if browsers aren't available
-```
-
-### Extended CI with browsers (when browsers are installed)
-```yaml
-- name: Install Chrome (Ubuntu)
-  run: |
-    wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
-    sudo apt-get update
-    sudo apt-get install google-chrome-stable
-
-- name: Run all tests including browser tests
-  run: cargo test --verbose
-```
 
 ## Local Development
 
-When developing locally, you can run different combinations:
+### Running Tests
 
 ```bash
-# Core functionality only (fast, reliable)
-cargo test --lib --test integration
-
-# Browser-specific tests only  
-cargo test --test browser_integration
-
-# All tests (will skip unavailable browser tests gracefully)
+# All tests (recommended)
 cargo test
 
-# All unit tests only
+# Unit tests only
 cargo test --lib
+
+# Specific test file
+cargo test --test integration
+cargo test --test browser_integration
 
 # Specific test by name
 cargo test test_launch_https_url
+```
+
+### Local Quality Checks
+
+```bash
+# Full development workflow
+cargo fmt
+cargo clippy -- -D warnings
+cargo test
+cargo doc --no-deps --document-private-items --all-features
 ```
 
 ## Test Count Summary

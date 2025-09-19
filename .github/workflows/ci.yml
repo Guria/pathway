@@ -68,13 +68,13 @@ jobs:
         working-directory: ./core
         run: cargo build --verbose
 
-      - name: Run core tests
+      - name: Run tests
         working-directory: ./core
-        run: cargo test --lib --test integration --verbose
+        run: cargo test --verbose
 
-      - name: Run core tests (release mode)
+      - name: Run tests (release mode)
         working-directory: ./core
-        run: cargo test --lib --test integration --release --verbose
+        run: cargo test --release --verbose
 
   coverage:
     name: Code Coverage
@@ -95,7 +95,7 @@ jobs:
 
       - name: Generate code coverage
         working-directory: ./core
-        run: cargo tarpaulin --out xml --all-features --exclude-files tests/browser_integration.rs
+        run: cargo tarpaulin --out xml --all-features
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
@@ -117,22 +117,3 @@ jobs:
       - name: Check MSRV
         working-directory: ./core
         run: cargo check --all-features
-
-  security-audit:
-    name: Security Audit
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v4
-
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install cargo-audit
-        run: cargo install cargo-audit --locked
-
-      - name: Run cargo audit
-        working-directory: ./core
-        env:
-          RUSTSEC_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: cargo audit
