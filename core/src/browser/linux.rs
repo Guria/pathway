@@ -35,6 +35,25 @@ pub fn detect_browsers() -> Vec<BrowserInfo> {
     result
 }
 
+/// Determine the system default browser on Linux.
+///
+/// Queries the desktop environment's default web browser entry (via xdg-settings) and attempts to
+/// map that desktop entry to a known browser candidate. If a matching candidate is found this
+/// returns a `SystemDefaultBrowser` populated with the desktop entry identifier, the candidate's
+/// display name, kind and channel. If the candidate's executable can be resolved on the system,
+/// `path` will contain the executable path; otherwise `path` is `None`.
+///
+/// Returns `None` if the default desktop entry cannot be determined.
+///
+/// # Examples
+///
+/// ```
+/// if let Some(sys) = system_default_browser() {
+///     println!("Default browser: {} ({})", sys.display_name, sys.identifier);
+/// } else {
+///     println!("No system default browser detected");
+/// }
+/// ```
 pub fn system_default_browser() -> Option<SystemDefaultBrowser> {
     if let Some(entry) = query_default_desktop_entry() {
         if let Some(candidate) = linux_candidates()
@@ -72,10 +91,42 @@ pub fn system_default_browser() -> Option<SystemDefaultBrowser> {
     None
 }
 
+/// Launches the given URLs using the specified launch target.
+///
+/// This is a convenience wrapper around `launch_with_profile` that does not
+/// supply profile or window options.
+///
+/// # Examples
+///
+/// ```no_run
+/// use crate::browser::{launch, LaunchTarget};
+///
+/// let urls = vec!["https://example.com".to_string()];
+/// // Launch using the system default browser
+/// let _ = launch(LaunchTarget::SystemDefault, &urls);
+/// ```
 pub fn launch(target: LaunchTarget<'_>, urls: &[String]) -> Result<LaunchOutcome, LaunchError> {
     launch_with_profile(target, urls, None, None)
 }
 
+/// Launches one or more URLs using either a specific browser or the system default, optionally applying profile and window options.
+///
+/// If `target` is `LaunchTarget::Browser`, this will resolve the browser executable and spawn it with the provided URLs. If both `profile_opts` and `window_opts` are supplied, profile-specific CLI arguments are generated and prepended to the browser command.
+/// If `target` is `LaunchTarget::SystemDefault`, each URL is opened via `xdg-open`.
+///
+/// Returns `Err(LaunchError::NoUrls)` when `urls` is empty. Returns `Err(LaunchError::MissingExecutable(...))` when the chosen browser has no resolvable executable. Spawn failures are returned as `LaunchError::Spawn { source }`.
+///
+/// # Examples
+///
+/// ```
+/// # use std::path::PathBuf;
+/// # use crate::browser::LaunchTarget;
+/// # use crate::browser::launch_with_profile;
+/// // Open two URLs with the system default browser
+/// let urls = vec!["https://example.com".to_string(), "https://rust-lang.org".to_string()];
+/// let outcome = launch_with_profile(LaunchTarget::SystemDefault, &urls, None, None);
+/// assert!(outcome.is_ok());
+/// ```
 pub fn launch_with_profile(
     target: LaunchTarget<'_>,
     urls: &[String],

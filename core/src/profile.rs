@@ -58,12 +58,40 @@ pub struct WindowOptions {
 pub struct ProfileManager;
 
 impl ProfileManager {
-    /// Discover profiles for a given browser
+    /// Discover available profiles for the specified browser.
+    ///
+    /// Returns a list of discovered ProfileInfo entries or a ProfileError if discovery fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// // Construct a BrowserInfo for the target browser, then:
+    /// let profiles = ProfileManager::discover_profiles(&browser_info).unwrap();
+    /// assert!(profiles.iter().all(|p| !p.name.is_empty()));
+    /// ```
     pub fn discover_profiles(browser: &BrowserInfo) -> Result<Vec<ProfileInfo>, ProfileError> {
         Self::discover_profiles_in_directory(browser, None)
     }
 
-    /// Discover profiles for a given browser in a specific directory
+    /// Discover profiles for `browser` using an optional custom base directory.
+    ///
+    /// Returns a vector of discovered `ProfileInfo` entries for the given browser:
+    /// - For Chromium-family browsers (Chrome, Edge, Brave, Vivaldi, Arc, Helium, Opera, Chromium)
+    ///   this delegates to Chromium-specific discovery and may return multiple profiles.
+    /// - For Firefox and Waterfox this delegates to Firefox-specific discovery and may return multiple profiles.
+    /// - For Safari and unknown/other browsers this returns a single default profile whose path is the
+    ///   provided `custom_base_dir` (if any) or an empty `PathBuf` otherwise.
+    ///
+    /// `custom_base_dir` can be used to override the platform default profile directory during discovery.
+    /// The function returns a `ProfileError` if underlying I/O or parsing operations fail.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// // Discover profiles using platform defaults
+    /// let profiles = ProfileManager::discover_profiles_in_directory(&browser, None).unwrap();
+    /// assert!(!profiles.is_empty());
+    /// ```
     pub fn discover_profiles_in_directory(
         browser: &BrowserInfo,
         custom_base_dir: Option<&Path>,
@@ -107,7 +135,23 @@ impl ProfileManager {
         }
     }
 
-    /// Find a specific profile by name
+    /// Finds a browser profile by name for the given browser.
+    ///
+    /// Searches the browser’s default profile directory and returns the first
+    /// profile whose internal name or display name matches `profile_name`.
+    /// Returns `ProfileError::ProfileNotFound` if no matching profile exists,
+    /// and may propagate discovery errors encountered while scanning.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// // Assume you have a BrowserInfo for Chrome.
+    /// let browser: BrowserInfo = get_chrome_browser_info();
+    ///
+    /// // Look up a profile by name (e.g., "Default" or a custom profile name).
+    /// let profile = ProfileManager::find_profile(&browser, "Default")?;
+    /// assert!(profile.is_default);
+    /// ```
     pub fn find_profile(
         browser: &BrowserInfo,
         profile_name: &str,
@@ -115,7 +159,29 @@ impl ProfileManager {
         Self::find_profile_in_directory(browser, profile_name, None)
     }
 
-    /// Find a specific profile by name in a custom directory
+    /// Find and return a profile whose `name` or `display_name` matches `profile_name`.
+    ///
+    /// This performs profile discovery (optionally under `custom_base_dir`) and searches the
+    /// resulting profiles for an exact match against either `ProfileInfo::name` or
+    /// `ProfileInfo::display_name`. If found, the matching `ProfileInfo` is returned.
+    ///
+    /// Errors:
+    /// - Returns `ProfileError::ProfileNotFound` if no matching profile is found.
+    /// - Propagates errors returned by `discover_profiles_in_directory` (I/O, parsing, etc.).
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use std::path::Path;
+    ///
+    /// // `browser` should be a prepared `BrowserInfo` for the target browser.
+    /// // `custom_dir` may be `None` to use the default discovery location.
+    /// let result = ProfileManager::find_profile_in_directory(&browser, "Default", None);
+    /// match result {
+    ///     Ok(profile) => println!("Found profile at {}", profile.path.display()),
+    ///     Err(e) => eprintln!("Profile lookup failed: {:?}", e),
+    /// }
+    /// ```
     pub fn find_profile_in_directory(
         browser: &BrowserInfo,
         profile_name: &str,
@@ -128,7 +194,23 @@ impl ProfileManager {
             .ok_or_else(|| ProfileError::ProfileNotFound(profile_name.to_string()))
     }
 
-    /// Generate launch arguments for profile options
+    /// Build command-line arguments to launch a browser according to the selected profile and window options.
+    ///
+    /// Chooses a browser-specific argument builder (Chromium-family, Firefox, Safari) based on `browser.kind`,
+    /// then appends any custom arguments from `profile_opts.custom_args`. Returns the full argument list to
+    /// pass to the browser executable.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use core::profile::{ProfileManager, ProfileOptions, WindowOptions};
+    /// # use core::browser::BrowserInfo;
+    /// let browser: BrowserInfo = /* obtain browser info */ unimplemented!();
+    /// let profile_opts = ProfileOptions { profile_type: Default, custom_args: vec![] };
+    /// let window_opts = WindowOptions { new_window: true, incognito: false, kiosk: false };
+    /// let args = ProfileManager::generate_profile_args(&browser, &profile_opts, &window_opts);
+    /// // `args` now contains browser-specific flags for the selected profile and window options.
+    /// ```
     pub fn generate_profile_args(
         browser: &BrowserInfo,
         profile_opts: &ProfileOptions,
@@ -172,7 +254,38 @@ impl ProfileManager {
         args
     }
 
-    /// Validate and create custom directory if needed
+    /// Ensure a path exists and is writable, creating the directory if necessary.
+    ///
+    /// This function:
+    /// - Creates the directory and any missing parent directories if the path does not exist.
+    /// - Verifies the path is a directory.
+    /// - Verifies the process can create and remove a small temporary file inside the directory to confirm write access.
+    ///
+    /// Returns the canonical PathBuf (owned) on success.
+    ///
+    /// Errors:
+    /// - Returns `ProfileError::PermissionDenied` if the directory cannot be created or is not writable.
+    /// - Returns `ProfileError::InvalidDirectory` if the path exists but is not a directory.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::env;
+    /// use std::fs;
+    /// use std::path::Path;
+    ///
+    /// // Create a temporary directory path under the system temp directory.
+    /// let dir = env::temp_dir().join("pathway_example_dir");
+    /// let _ = fs::remove_dir_all(&dir); // ignore errors; example cleanup
+    ///
+    /// let result = crate::profile::prepare_custom_directory(Path::new(&dir));
+    /// assert!(result.is_ok());
+    /// let path = result.unwrap();
+    /// assert!(path.exists() && path.is_dir());
+    ///
+    /// // cleanup
+    /// let _ = fs::remove_dir_all(&dir);
+    /// ```
     pub fn prepare_custom_directory(path: &Path) -> Result<PathBuf, ProfileError> {
         let path = path.to_path_buf();
 
@@ -220,7 +333,20 @@ impl ProfileManager {
         Ok(path)
     }
 
-    /// Create a temporary profile directory
+    /// Create a new unique temporary profile directory and return its path.
+    ///
+    /// The directory is created under the system temporary directory with a
+    /// name prefixed by `pathway_profile_` and a timestamp-based identifier.
+    /// Returns the created directory path or a `ProfileError` if creation fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let dir = create_temp_profile().expect("failed to create temp profile");
+    /// assert!(dir.exists() && dir.is_dir());
+    /// // cleanup
+    /// std::fs::remove_dir_all(dir).unwrap();
+    /// ```
     pub fn create_temp_profile() -> Result<PathBuf, ProfileError> {
         let temp_dir =
             std::env::temp_dir().join(format!("pathway_profile_{}", generate_timestamp_id()));
@@ -228,6 +354,37 @@ impl ProfileManager {
         Ok(temp_dir)
     }
 
+    /// Discover Chromium-based browser profiles by reading the "Local State" file in
+    /// the browser's user data directory (or a provided custom base directory).
+    ///
+    /// Returns a Vec of ProfileInfo for each profile found. Behavior:
+    /// - If a `custom_base_dir` is provided, it is used as the base user-data directory;
+    ///   otherwise the platform-specific chromium base directory for `browser.kind` is used.
+    /// - If the "Local State" file is missing, returns a single default ProfileInfo.
+    /// - If "Local State" contains a `profile.info_cache` object, each entry that has a
+    ///   corresponding profile directory under the base directory becomes a ProfileInfo
+    ///   (name, display_name, path, is_default, last_used).
+    /// - If no profiles are discovered but a "Default" directory exists, a Default profile
+    ///   entry is returned.
+    /// - If nothing can be discovered, returns a default ProfileInfo as a fallback.
+    ///
+    /// Returns:
+    /// - Ok(Vec<ProfileInfo>) on success.
+    /// - Err(ProfileError) on IO or JSON parse errors or if the browser kind is unsupported
+    ///   when resolving the chromium base directory.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use core::profile::ProfileManager;
+    /// use core::browser::BrowserInfo;
+    /// use core::browser::BrowserKind;
+    ///
+    /// // Construct a BrowserInfo for the target browser (example only)
+    /// let browser = BrowserInfo { kind: BrowserKind::Chrome, ..Default::default() };
+    /// let profiles = ProfileManager::discover_chromium_profiles_in_dir(&browser, None).unwrap();
+    /// assert!(!profiles.is_empty());
+    /// ```
     fn discover_chromium_profiles_in_dir(
         browser: &BrowserInfo,
         custom_base_dir: Option<&Path>,
@@ -303,6 +460,25 @@ impl ProfileManager {
         Ok(profiles)
     }
 
+    /// Discover Firefox profiles by reading a `profiles.ini` file in the Firefox base directory (or a provided custom directory).
+    ///
+    /// Returns a list of discovered `ProfileInfo` entries. If `profiles.ini` is missing or no valid profiles are parsed,
+    /// a single default profile (from `Self::default_profile`) is returned. The function reads and parses `profiles.ini`
+    /// sections, converts each profile section via `Self::parse_firefox_profile`, and preserves the discovery order.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `ProfileError` if the base directory cannot be resolved or if I/O/JSON operations fail while reading the file.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::path::Path;
+    ///
+    /// // Example usage (types shown for clarity; construct `browser` according to your codebase):
+    /// // let browser = BrowserInfo { kind: BrowserKind::Firefox, /* ... */ };
+    /// // let profiles = ProfileManager::discover_firefox_profiles_in_dir(&browser, Some(Path::new("/custom/firefox"))).unwrap();
+    /// ```
     fn discover_firefox_profiles_in_dir(
         browser: &BrowserInfo,
         custom_base_dir: Option<&Path>,
@@ -360,6 +536,40 @@ impl ProfileManager {
         Ok(profiles)
     }
 
+    /// Parse a Firefox `profiles.ini` profile entry into a `ProfileInfo`.
+    ///
+    /// Returns `None` when required fields are missing or the resolved profile path does not exist.
+    /// - Treats `IsRelative=1` (or missing) as joining `Path` to `base_dir`; when `IsRelative=0` `Path` is used as absolute.
+    /// - `Name` becomes both `name` and `display_name`.
+    /// - `Default=1` sets `is_default = true`; otherwise false.
+    /// - `last_used` is not populated by this parser.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::collections::HashMap;
+    /// use std::fs;
+    /// use std::path::Path;
+    ///
+    /// // prepare a temporary directory to act as the firefox profile base
+    /// let base = std::env::temp_dir().join("example_firefox_base");
+    /// let profile_sub = "profile123";
+    /// let profile_path = base.join(profile_sub);
+    /// let _ = fs::create_dir_all(&profile_path);
+    ///
+    /// let mut data = HashMap::new();
+    /// data.insert("Name".to_string(), "default".to_string());
+    /// data.insert("Path".to_string(), profile_sub.to_string());
+    /// data.insert("IsRelative".to_string(), "1".to_string());
+    /// data.insert("Default".to_string(), "1".to_string());
+    ///
+    /// // assumes BrowserKind::Firefox is available in scope
+    /// let info = crate::parse_firefox_profile(data, &base, crate::BrowserKind::Firefox)
+    ///     .expect("should parse profile");
+    /// assert_eq!(info.name, "default");
+    /// assert!(info.is_default);
+    /// assert_eq!(info.path, profile_path);
+    /// ```
     fn parse_firefox_profile(
         profile_data: HashMap<String, String>,
         base_dir: &Path,
@@ -402,6 +612,23 @@ impl ProfileManager {
         })
     }
 
+    /// Returns the platform-specific user data base directory for Chromium-family browsers.
+    ///
+    /// Given a `BrowserKind` for a Chromium-based browser (Chrome, Edge, Brave, Vivaldi, Arc,
+    /// Helium, Opera, Chromium), this returns the expected base profile directory for the current
+    /// operating system (macOS, Linux, Windows). The returned path is suitable for locating the
+    /// browser's profile subdirectories (e.g. `Default`, `Profile 1`) or for use as `--user-data-dir`.
+    ///
+    /// Returns `Err(ProfileError::InvalidDirectory(_))` if the user's home directory cannot be
+    /// determined, or `Err(ProfileError::UnsupportedBrowser(_))` if `browser_kind` is not a
+    /// supported Chromium-family browser.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let dir = get_chromium_base_dir(BrowserKind::Chrome).expect("expected to resolve base dir");
+    /// assert!(dir.is_absolute());
+    /// ```
     fn get_chromium_base_dir(browser_kind: BrowserKind) -> Result<PathBuf, ProfileError> {
         let home = dirs::home_dir().ok_or_else(|| {
             ProfileError::InvalidDirectory("Could not determine home directory".to_string())
@@ -479,6 +706,19 @@ impl ProfileManager {
         }
     }
 
+    /// Returns the platform-specific base directory for Firefox profiles under the current user's home directory.
+    ///
+    /// On macOS this is `~/Library/Application Support/Firefox`, on Linux `~/.mozilla/firefox`,
+    /// and on Windows `~/AppData/Roaming/Mozilla/Firefox`. If the user's home directory cannot be
+    /// determined the function returns `ProfileError::InvalidDirectory`. On unsupported platforms
+    /// it returns `ProfileError::UnsupportedBrowser`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let base = get_firefox_base_dir().expect("failed to locate Firefox base directory");
+    /// println!("{}", base.display());
+    /// ```
     fn get_firefox_base_dir() -> Result<PathBuf, ProfileError> {
         let home = dirs::home_dir().ok_or_else(|| {
             ProfileError::InvalidDirectory("Could not determine home directory".to_string())
@@ -504,6 +744,18 @@ impl ProfileManager {
         }
     }
 
+    /// Construct a default ProfileInfo for the given browser kind.
+    ///
+    /// Returns a ProfileInfo representing the canonical "default" profile: name "default",
+    /// display name "Default", an empty path, marked as the default profile, and no last-used timestamp.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let info = default_profile(BrowserKind::Chrome);
+    /// assert_eq!(info.name, "default");
+    /// assert!(info.is_default);
+    /// ```
     fn default_profile(browser_kind: BrowserKind) -> ProfileInfo {
         ProfileInfo {
             name: "default".to_string(),
@@ -515,6 +767,28 @@ impl ProfileManager {
         }
     }
 
+    /// Build command-line arguments for launching Chromium-family browsers according to
+    /// the selected profile and requested window options.
+    ///
+    /// - `ProfileType::Named(name)` is resolved via `find_profile`; when found the resolved
+    ///   profile's `name` is passed as `--profile-directory=<name>`. If resolution fails the
+    ///   supplied `name` is used as the directory name.
+    /// - `ProfileType::CustomDirectory` and `ProfileType::Temporary` set `--user-data-dir=<path>`.
+    /// - `ProfileType::Guest` adds `--guest`. `ProfileType::Default` adds no profile-specific flags.
+    /// - Window options add `--incognito`, `--new-window`, and `--kiosk` when enabled.
+    ///
+    /// Returns the assembled argument list (may be empty for defaults).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// // Construct minimal examples appropriate for your environment; these types come from the crate.
+    /// let browser = /* a BrowserInfo for a Chromium-family browser */;
+    /// let profile_opts = ProfileOptions { profile_type: ProfileType::Default, custom_args: vec![] };
+    /// let window_opts = WindowOptions { new_window: true, incognito: false, kiosk: false };
+    /// let args = chromium_profile_args(&browser, &profile_opts, &window_opts);
+    /// assert!(args.contains(&"--new-window".to_string()));
+    /// ```
     fn chromium_profile_args(
         browser: &BrowserInfo,
         profile_opts: &ProfileOptions,
@@ -568,6 +842,27 @@ impl ProfileManager {
         args
     }
 
+    /// Build command-line arguments for launching Firefox-family browsers based on the selected profile and window options.
+    ///
+    /// The function maps ProfileType to Firefox CLI flags:
+    /// - `Named(name)`: resolves the named profile; if found the profile's display name is passed with `-P`, otherwise the provided name is used.
+    /// - `CustomDirectory(path)` / `Temporary(path)`: passed as `--profile <path>`.
+    /// - `Guest`: requests a private window with `--private-window`.
+    /// WindowOptions set the window-level flags: `--private-window`, `--new-window`, and `--kiosk` are appended when requested.
+    ///
+    /// Returns a Vec<String> containing the arguments to append to a Firefox launch command.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use core::profile::{ProfileOptions, ProfileType, WindowOptions};
+    /// // `browser` would be a BrowserInfo instance from the surrounding crate.
+    /// let browser = /* BrowserInfo */ unimplemented!();
+    /// let profile_opts = ProfileOptions { profile_type: ProfileType::Named("default".into()), custom_args: vec![] };
+    /// let window_opts = WindowOptions { new_window: true, incognito: false, kiosk: false };
+    /// let args = core::profile::ProfileManager::firefox_profile_args(&browser, &profile_opts, &window_opts);
+    /// // args now contains Firefox-appropriate CLI flags such as ["-P", "default", "--new-window"]
+    /// ```
     fn firefox_profile_args(
         browser: &BrowserInfo,
         profile_opts: &ProfileOptions,
@@ -622,6 +917,24 @@ impl ProfileManager {
         args
     }
 
+    /// Build command-line arguments for launching Safari according to the given options.
+    ///
+    /// For Safari this function currently does not produce any launch arguments.
+    /// If `window_opts.incognito` is true a warning is emitted because Safari's
+    /// private (incognito) mode cannot be enabled purely via command-line and
+    /// requires AppleScript or other automation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let profile_opts = ProfileOptions {
+    ///     profile_type: ProfileType::Default,
+    ///     custom_args: Vec::new(),
+    /// };
+    /// let window_opts = WindowOptions::default();
+    /// let args = safari_profile_args(&profile_opts, &window_opts);
+    /// assert!(args.is_empty());
+    /// ```
     fn safari_profile_args(
         _profile_opts: &ProfileOptions,
         window_opts: &WindowOptions,
@@ -635,6 +948,17 @@ impl ProfileManager {
         Vec::new()
     }
 
+    /// Build command-line arguments for generic (non-browser-specific) window options.
+    ///
+    /// Currently only maps `incognito` to the common `--private` flag.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let opts = WindowOptions { new_window: false, incognito: true, kiosk: false };
+    /// let args = generic_window_args(&opts);
+    /// assert_eq!(args, vec!["--private".to_string()]);
+    /// ```
     fn generic_window_args(window_opts: &WindowOptions) -> Vec<String> {
         let mut args = Vec::new();
 
@@ -646,6 +970,20 @@ impl ProfileManager {
     }
 }
 
+/// Generate a hex-encoded, nanosecond-resolution timestamp string.
+///
+/// The returned string is the current system time since the UNIX epoch, encoded as lowercase hexadecimal
+/// from the nanosecond count. Intended for use as a lightweight, mostly-unique identifier (e.g., temp
+/// directory names).
+///
+/// # Examples
+///
+/// ```
+/// let id = generate_timestamp_id();
+/// // parse back to ensure it's valid hex and non-zero
+/// let value = u128::from_str_radix(&id, 16).unwrap();
+/// assert!(value > 0);
+/// ```
 fn generate_timestamp_id() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
     let timestamp = SystemTime::now()
@@ -655,7 +993,27 @@ fn generate_timestamp_id() -> String {
     format!("{:x}", timestamp)
 }
 
-/// Validate profile options for conflicts and unsupported combinations
+/// Validate profile and window option combinations for a given browser and return any warnings.
+///
+/// This function checks for option conflicts and unsupported combinations and returns a list
+/// of human-readable warning messages (empty if none). Examples of checked conditions:
+/// - Using incognito with a non-default profile (incognito will ignore profile selection).
+/// - Browser-specific unsupported profile types (e.g., Safari does not support named or custom directories).
+/// - Browser-specific window option limitations (e.g., Safari kiosk/incognito not supported via CLI).
+/// - Tor Browser and unknown browsers receive warnings about potential anonymity or compatibility issues.
+///
+/// # Returns
+///
+/// A `Result` containing a `Vec<String>` of warnings. The function does not return an error in
+/// normal validation flows; `ProfileError` is reserved for underlying errors in other APIs.
+///
+/// # Examples
+///
+/// ```
+/// // Assume `browser`, `profile_opts`, and `window_opts` are constructed appropriately:
+/// // let warnings = validate_profile_options(&browser, &profile_opts, &window_opts).unwrap();
+/// // assert!(warnings.is_empty() || warnings.iter().any(|w| w.contains("does not support")));
+/// ```
 pub fn validate_profile_options(
     browser: &BrowserInfo,
     profile_opts: &ProfileOptions,

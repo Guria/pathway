@@ -32,15 +32,60 @@ pub fn detect_browsers() -> Vec<BrowserInfo> {
     result
 }
 
+/// Returns the system default browser on Windows, if available.
+///
+/// Currently unimplemented on Windows — this function always returns `None`.
+///
+/// # Examples
+///
+/// ```
+/// let sys = system_default_browser();
+/// assert!(sys.is_none());
+/// ```
 pub fn system_default_browser() -> Option<SystemDefaultBrowser> {
     // TODO: Implement Windows system default browser detection via registry queries
     None
 }
 
+/// Launches the given URLs using the specified target (a specific browser or the system default).
+///
+/// This is a convenience wrapper that calls `launch_with_profile` without any profile or window options.
+/// Returns `Err(LaunchError::NoUrls)` if `urls` is empty. Other error variants may be returned if an
+/// executable cannot be resolved or the process spawn fails.
+///
+/// # Examples
+///
+/// ```
+/// use crate::browser::{LaunchTarget, windows::launch};
+///
+/// let urls = vec!["https://example.com".to_string()];
+/// let _ = launch(LaunchTarget::SystemDefault, &urls);
+/// ```
 pub fn launch(target: LaunchTarget<'_>, urls: &[String]) -> Result<LaunchOutcome, LaunchError> {
     launch_with_profile(target, urls, None, None)
 }
 
+/// Launches the given URLs either in a specific browser or via the system default, optionally applying profile/window options.
+///
+/// When `target` is `LaunchTarget::Browser(info)`, this spawns the browser executable returned by `info.launch_path()`,
+/// appending generated profile arguments if both `profile_opts` and `window_opts` are provided, then appending the URLs.
+/// When `target` is `LaunchTarget::SystemDefault`, each URL is launched via `rundll32 url.dll,FileProtocolHandler`.
+///
+/// Errors:
+/// - `LaunchError::NoUrls` if `urls` is empty.
+/// - `LaunchError::MissingExecutable(_)` if a requested browser has no executable path.
+/// - `LaunchError::Spawn { source: io::Error }` if spawning a process fails.
+///
+/// # Examples
+///
+/// ```no_run
+/// use crate::browser::windows::{launch_with_profile, LaunchTarget};
+///
+/// let urls = vec!["https://example.com".to_string()];
+/// // Launch using the system default handler (no profile/window options)
+/// let outcome = launch_with_profile(LaunchTarget::SystemDefault, &urls, None, None).unwrap();
+/// println!("Launched: {:?}", outcome.command.display);
+/// ```
 pub fn launch_with_profile(
     target: LaunchTarget<'_>,
     urls: &[String],

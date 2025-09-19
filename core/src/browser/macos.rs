@@ -35,6 +35,26 @@ pub fn detect_browsers() -> Vec<BrowserInfo> {
     result
 }
 
+/// Returns information about the system's default browser for the `https` scheme, if one is registered.
+///
+/// If the LaunchServices defaults include a handler bundle identifier for `https` and that bundle ID
+/// matches a known macOS browser candidate, this returns a `SystemDefaultBrowser` populated with
+/// the bundle identifier, the candidate's display name, kind, channel, and a resolved bundle path
+/// when the app bundle can be found on disk. If the bundle ID is present but does not match any
+/// known candidate, the returned `SystemDefaultBrowser` will contain the bundle identifier and a
+/// generic `"System default"` display name with `None` for kind, channel, and path. Returns `None`
+/// when no default handler for the `https` scheme is found.
+///
+/// # Examples
+///
+/// ```
+/// if let Some(sys) = system_default_browser() {
+///     // `identifier` is the bundle id of the default browser (e.g. "com.apple.Safari")
+///     println!("Default browser bundle id: {}", sys.identifier);
+/// } else {
+///     println!("No default browser for https was found.");
+/// }
+/// ```
 pub fn system_default_browser() -> Option<SystemDefaultBrowser> {
     if let Some(bundle_id) = default_handler_for_scheme("https") {
         if let Some(candidate) = mac_candidates()
@@ -70,10 +90,62 @@ pub fn system_default_browser() -> Option<SystemDefaultBrowser> {
     None
 }
 
+/// Launch the specified browser (or the system default) with the given URLs.
+///
+/// This is a convenience wrapper around `launch_with_profile` that does not pass any
+/// profile or window options.
+///
+/// Returns a `LaunchOutcome` on success or a `LaunchError` on failure (for example
+/// when no URLs are provided, an executable is missing, or the spawn fails).
+///
+/// # Examples
+///
+/// ```no_run
+/// use crate::macos::{launch, LaunchTarget};
+///
+/// let urls = vec!["https://example.com".to_string()];
+/// let _outcome = launch(LaunchTarget::SystemDefault, &urls);
+/// ```
 pub fn launch(target: LaunchTarget<'_>, urls: &[String]) -> Result<LaunchOutcome, LaunchError> {
     launch_with_profile(target, urls, None, None)
 }
 
+/// Launches a URL list in a specified browser or the system default, optionally using profile and window options.
+///
+/// This function accepts either a specific browser (LaunchTarget::Browser) or the system default
+/// (LaunchTarget::SystemDefault). Behavior:
+/// - Browser (Safari): uses the macOS `open -b com.apple.Safari` command and respects `window_opts.new_window`.
+/// - Browser (non‑Safari): invokes the browser's executable found via `BrowserInfo::launch_path()`. If both
+///   `profile_opts` and `window_opts` are provided, profile-specific arguments are generated and prepended
+///   before the URLs.
+/// - SystemDefault: uses `open` to open URLs with the current system default browser and respects `window_opts`.
+///
+/// Errors:
+/// - Returns `LaunchError::NoUrls` if `urls` is empty.
+/// - Returns `LaunchError::MissingExecutable` if a non‑Safari browser is requested but no executable is found.
+/// - Returns `LaunchError::Spawn { source: io::Error }` if spawning the `open` or browser process fails.
+///
+/// Parameters:
+/// - `target`: which browser to launch (specific browser or system default).
+/// - `urls`: non-empty slice of URL strings to open.
+/// - `profile_opts`: optional profile configuration; used only for non‑Safari browsers when paired with `window_opts`.
+/// - `window_opts`: optional window behavior (e.g., request a new window).
+///
+/// Returns:
+/// - `Ok(LaunchOutcome)` on success containing the launched browser info (if any), detected system default (if used),
+///   and the exact `LaunchCommand` used to invoke the process.
+///
+/// # Examples
+///
+/// ```
+/// # use crate::{launch_with_profile, LaunchTarget};
+/// # // Example assumes appropriate BrowserInfo and Profile/Window types are in scope.
+/// let urls = vec!["https://example.com".to_string()];
+/// // Launch with the system default browser without profile or window options:
+/// let outcome = launch_with_profile(LaunchTarget::SystemDefault, &urls, None, None)?;
+/// assert!(outcome.command.program.ends_with("open"));
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
 pub fn launch_with_profile(
     target: LaunchTarget<'_>,
     urls: &[String],
