@@ -33,6 +33,7 @@ pub fn detect_browsers() -> Vec<BrowserInfo> {
 }
 
 pub fn system_default_browser() -> Option<SystemDefaultBrowser> {
+    // TODO: Implement Windows system default browser detection via registry queries
     None
 }
 

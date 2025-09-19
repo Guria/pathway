@@ -1,4 +1,5 @@
 use serde::Serialize;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 #[cfg(target_os = "macos")]
@@ -192,14 +193,9 @@ pub fn detect_inventory() -> BrowserInventory {
 }
 
 fn deduplicate(browsers: &mut Vec<BrowserInfo>) {
-    let mut seen: Vec<String> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
     browsers.retain(|browser| {
-        if seen.iter().any(|existing| existing == &browser.cli_name) {
-            false
-        } else {
-            seen.push(browser.cli_name.clone());
-            true
-        }
+        seen.insert(browser.cli_name.clone())
     });
 }
 
