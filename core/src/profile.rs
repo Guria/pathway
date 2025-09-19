@@ -401,20 +401,23 @@ impl ProfileManager {
         };
         let local_state_path = base_dir.join("Local State");
 
-        if !local_state_path.exists() {
-            debug!(
-                "Local State file not found at {}",
-                local_state_path.display()
-            );
-            return Ok(vec![Self::default_profile(browser.kind)]);
-        }
-
-        let local_state_content = fs::read_to_string(&local_state_path)?;
-        let local_state: serde_json::Value = serde_json::from_str(&local_state_content)?;
-
         let mut profiles = Vec::new();
 
-        if let Some(profile_info) = local_state.get("profile").and_then(|p| p.get("info_cache")) {
+        if local_state_path.exists() {
+            let local_state_content = fs::read_to_string(&local_state_path)?;
+            let local_state: serde_json::Value = serde_json::from_str(&local_state_content)?;
+            if let Some(profile_info) = local_state.get("profile").and_then(|p| p.get("info_cache")) {
+                if let Some(profile_obj) = profile_info.as_object() {
+                    for (profile_id, profile_data) in profile_obj {
+                        let profile_path = base_dir.join(profile_id);
+                        if !profile_path.exists() {
+                            continue;
+                        }
+                        ...
+                    }
+                }
+            }
+        }
             if let Some(profile_obj) = profile_info.as_object() {
                 for (profile_id, profile_data) in profile_obj {
                     let profile_path = base_dir.join(profile_id);
