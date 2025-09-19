@@ -7,7 +7,9 @@ fn test_valid_https_url() {
     cmd.arg("https://example.com")
         .assert()
         .success()
-        .stderr(predicate::str::contains("URL validated: https://example.com/"));
+        .stderr(predicate::str::contains(
+            "URL validated: https://example.com/",
+        ));
 }
 
 #[test]
@@ -16,7 +18,9 @@ fn test_valid_http_url() {
     cmd.arg("http://localhost:3000/api")
         .assert()
         .success()
-        .stderr(predicate::str::contains("URL validated: http://localhost:3000/api"));
+        .stderr(predicate::str::contains(
+            "URL validated: http://localhost:3000/api",
+        ));
 }
 
 #[test]
@@ -25,15 +29,15 @@ fn test_auto_https_scheme() {
     cmd.arg("example.com")
         .assert()
         .success()
-        .stderr(predicate::str::contains("URL validated: https://example.com/"));
+        .stderr(predicate::str::contains(
+            "URL validated: https://example.com/",
+        ));
 }
 
 #[test]
 fn test_file_url() {
     let mut cmd = Command::cargo_bin("pathway").unwrap();
-    cmd.arg("file:///etc/hosts")
-        .assert()
-        .success();
+    cmd.arg("file:///etc/hosts").assert().success();
 }
 
 #[test]
@@ -48,7 +52,7 @@ fn test_auto_file_scheme() {
 #[test]
 fn test_multiple_urls() {
     let mut cmd = Command::cargo_bin("pathway").unwrap();
-    cmd.args(&["https://a.co", "https://b.co"])
+    cmd.args(["https://a.co", "https://b.co"])
         .assert()
         .success()
         .stderr(predicate::str::contains("https://a.co/"))
@@ -85,15 +89,13 @@ fn test_ftp_scheme_rejected() {
 #[test]
 fn test_invalid_url() {
     let mut cmd = Command::cargo_bin("pathway").unwrap();
-    cmd.arg("not a url at all")
-        .assert()
-        .failure();
+    cmd.arg("not a url at all").assert().failure();
 }
 
 #[test]
 fn test_json_output() {
     let mut cmd = Command::cargo_bin("pathway").unwrap();
-    cmd.args(&["--format", "json", "https://example.com"])
+    cmd.args(["--format", "json", "https://example.com"])
         .assert()
         .success()
         .stdout(predicate::str::contains(r#""status":"valid"#))
@@ -103,7 +105,7 @@ fn test_json_output() {
 #[test]
 fn test_verbose_mode() {
     let mut cmd = Command::cargo_bin("pathway").unwrap();
-    cmd.args(&["--verbose", "example.com"])
+    cmd.args(["--verbose", "example.com"])
         .assert()
         .success()
         .stderr(predicate::str::contains("DEBUG"));
@@ -112,7 +114,7 @@ fn test_verbose_mode() {
 #[test]
 fn test_mixed_valid_invalid() {
     let mut cmd = Command::cargo_bin("pathway").unwrap();
-    cmd.args(&["javascript:alert(1)", "https://valid.com"])
+    cmd.args(["javascript:alert(1)", "https://valid.com"])
         .assert()
         .failure()
         .stderr(predicate::str::contains("Unsupported scheme: javascript"))

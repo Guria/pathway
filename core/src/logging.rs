@@ -1,5 +1,5 @@
-use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 use std::io;
+use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 pub fn setup_logging(verbose: bool, json_format: bool) {
     let env_filter = if verbose {

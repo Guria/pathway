@@ -1,6 +1,5 @@
 use clap::Parser;
 use pathway::{logging, validate_url, ValidatedUrl, ValidationStatus};
-use serde_json;
 use std::process;
 use tracing::{error, info};
 
@@ -46,7 +45,7 @@ fn main() {
         match validate_url(url) {
             Ok(validated) => {
                 results.push(validated.clone());
-                
+
                 if matches!(args.format, OutputFormat::Human) {
                     if let Some(warning) = &validated.warning {
                         info!(
@@ -59,15 +58,14 @@ fn main() {
                     } else {
                         info!(
                             "URL validated: {} (scheme: {})",
-                            validated.normalized,
-                            validated.scheme
+                            validated.normalized, validated.scheme
                         );
                     }
                 }
             }
             Err(e) => {
                 has_error = true;
-                
+
                 let invalid = ValidatedUrl {
                     original: url.clone(),
                     url: url.clone(),
@@ -76,9 +74,9 @@ fn main() {
                     status: ValidationStatus::Invalid,
                     warning: Some(e.to_string()),
                 };
-                
+
                 results.push(invalid);
-                
+
                 if matches!(args.format, OutputFormat::Human) {
                     error!("URL {}: {}", index + 1, e);
                 }

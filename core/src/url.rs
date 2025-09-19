@@ -5,7 +5,15 @@ use tracing::{debug, warn};
 use url::Url;
 
 const DANGEROUS_SCHEMES: &[&str] = &[
-    "javascript", "data", "vbscript", "about", "blob", "ftp", "sftp", "ssh", "telnet",
+    "javascript",
+    "data",
+    "vbscript",
+    "about",
+    "blob",
+    "ftp",
+    "sftp",
+    "ssh",
+    "telnet",
 ];
 
 const SUPPORTED_SCHEMES: &[&str] = &["http", "https", "file"];
@@ -30,12 +38,12 @@ pub enum ValidationStatus {
 
 pub fn validate_url(input: &str) -> Result<ValidatedUrl> {
     debug!("Input: \"{}\"", input);
-    
+
     // Check for path traversal in the original input first
     if input.starts_with("file://") && contains_path_traversal(input) {
         return Err(PathwayError::PathTraversal(input.to_string()));
     }
-    
+
     // Try to parse as-is first
     let url = match Url::parse(input) {
         Ok(url) => url,
@@ -62,7 +70,7 @@ pub fn validate_url(input: &str) -> Result<ValidatedUrl> {
     // Special handling for file URLs
     let normalized = if url.scheme() == "file" {
         let path = url.path();
-        
+
         // Check for path traversal
         if contains_path_traversal(path) {
             return Err(PathwayError::PathTraversal(path.to_string()));
@@ -114,7 +122,7 @@ fn auto_detect_scheme(input: &str) -> Result<String> {
         } else {
             std::env::current_dir()?.join(path)
         };
-        
+
         Ok(format!("file://{}", absolute.display()))
     } else if !input.contains("://") && (input.contains('.') || input.contains("localhost")) {
         // Likely a domain name
@@ -128,13 +136,14 @@ fn auto_detect_scheme(input: &str) -> Result<String> {
 }
 
 fn contains_path_traversal(path: &str) -> bool {
-    // Check for various path traversal patterns
-    path.contains("../") || 
-    path.contains("..\\") || 
-    path.contains("....") ||
-    path.contains("%2e%2e") ||
-    path.contains("%2e%2e%2f") ||
-    path.contains("%2e%2e%5c")
+    // Normalize to ASCII lowercase to match percent-encodings regardless of case.
+    let p = path.to_ascii_lowercase();
+    p.contains("../")
+        || p.contains("..\\")
+        || p.contains("....")
+        || p.contains("%2e%2e")
+        || p.contains("%2e%2e%2f")
+        || p.contains("%2e%2e%5c")
 }
 
 #[cfg(test)]
@@ -166,5 +175,8 @@ mod tests {
     fn test_path_traversal() {
         assert!(validate_url("file:///../etc/passwd").is_err());
         assert!(validate_url("file:///tmp/../../../etc/passwd").is_err());
+        // Test case-insensitive percent-encoding detection
+        assert!(validate_url("file:///%2E%2E/etc/passwd").is_err());
+        assert!(validate_url("file:///%2E%2E%2F../etc/passwd").is_err());
     }
 }
