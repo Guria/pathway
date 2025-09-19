@@ -61,21 +61,16 @@ impl BrowserKind {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum BrowserChannel {
+    #[default]
     Stable,
     Beta,
     Dev,
     Canary,
     Nightly,
     Unknown,
-}
-
-impl Default for BrowserChannel {
-    fn default() -> Self {
-        BrowserChannel::Stable
-    }
 }
 
 impl BrowserChannel {

@@ -4,7 +4,7 @@ use super::{
 };
 use std::env;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use thiserror::Error;
 use tracing::debug;

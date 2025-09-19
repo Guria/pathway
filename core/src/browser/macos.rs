@@ -470,9 +470,9 @@ fn parse_defaults_for_scheme(data: &str, scheme: &str) -> Option<String> {
 
         if trimmed.starts_with("LSHandlerURLScheme") {
             current_scheme = parse_defaults_value(trimmed);
-        } else if trimmed.starts_with("LSHandlerRoleAll") {
-            current_handler = parse_defaults_value(trimmed);
-        } else if trimmed.starts_with("LSHandlerRoleViewer") {
+        } else if trimmed.starts_with("LSHandlerRoleAll")
+            || trimmed.starts_with("LSHandlerRoleViewer")
+        {
             current_handler = parse_defaults_value(trimmed);
         }
 
