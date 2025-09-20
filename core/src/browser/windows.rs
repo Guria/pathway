@@ -220,6 +220,7 @@ fn windows_candidates() -> &'static [WindowsBrowserCandidate] {
                 "Google/Chrome/Application/chrome.exe", // Traditional Windows installation
                 "googlechrome/current/chrome.exe",      // Scoop installation
                 "googlechrome/tools/chrome.exe",        // Chocolatey installation
+                "chrome.exe",                           // Chocolatey shim
             ],
             aliases: &["google-chrome"],
         },
@@ -264,6 +265,7 @@ fn windows_candidates() -> &'static [WindowsBrowserCandidate] {
                 "Mozilla Firefox/firefox.exe", // Traditional Windows installation
                 "firefox/current/firefox.exe", // Scoop installation
                 "firefox/tools/firefox.exe",   // Chocolatey installation
+                "firefox.exe",                 // Chocolatey shim
             ],
             aliases: &["mozilla-firefox"],
         },
@@ -296,6 +298,7 @@ fn windows_candidates() -> &'static [WindowsBrowserCandidate] {
                 "Microsoft/Edge/Application/msedge.exe", // Traditional Windows installation
                 "msedge/current/msedge.exe",             // Scoop installation (if available)
                 "msedge/tools/msedge.exe",               // Chocolatey installation (if available)
+                "msedge.exe",                            // Chocolatey shim
             ],
             aliases: &["microsoft-edge"],
         },
@@ -332,6 +335,7 @@ fn windows_candidates() -> &'static [WindowsBrowserCandidate] {
                 "BraveSoftware/Brave-Browser/Application/brave.exe", // Traditional Windows installation
                 "brave/current/brave.exe",                           // Scoop installation
                 "brave/tools/brave.exe",                             // Chocolatey installation
+                "brave.exe",                                         // Chocolatey shim
             ],
             aliases: &["brave-browser"],
         },
@@ -420,7 +424,7 @@ fn resolve_candidate(candidate: &WindowsBrowserCandidate) -> Option<BrowserInfo>
     for base in windows_base_dirs() {
         for relative in candidate.relative_paths {
             let path = base.join(relative);
-            if path.exists() {
+            if path.is_file() {
                 // Determine installation source based on the base directory
                 let source = determine_installation_source(&base);
 
@@ -448,16 +452,35 @@ fn resolve_candidate(candidate: &WindowsBrowserCandidate) -> Option<BrowserInfo>
     None
 }
 
-fn determine_installation_source(base_path: &PathBuf) -> String {
-    let path_str = base_path.to_string_lossy().to_lowercase();
+fn determine_installation_source(base_path: &std::path::Path) -> String {
+    use std::path::Component;
 
-    if path_str.contains("scoop") {
-        "scoop".to_string()
-    } else if path_str.contains("chocolatey") {
-        "chocolatey".to_string()
-    } else {
-        "windows".to_string()
+    // Convert path components to lowercase strings for comparison
+    let components: Vec<String> = base_path
+        .components()
+        .filter_map(|comp| {
+            if let Component::Normal(os_str) = comp {
+                Some(os_str.to_string_lossy().to_lowercase())
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    // Check for Scoop installation patterns
+    if components.contains(&"scoop".to_string()) && components.contains(&"apps".to_string()) {
+        return "scoop".to_string();
     }
+
+    // Check for Chocolatey installation patterns
+    if components.contains(&"chocolatey".to_string())
+        && (components.contains(&"lib".to_string()) || components.contains(&"bin".to_string()))
+    {
+        return "chocolatey".to_string();
+    }
+
+    // Default to windows for traditional installations
+    "windows".to_string()
 }
 
 fn windows_base_dirs() -> Vec<PathBuf> {
@@ -485,8 +508,10 @@ fn windows_base_dirs() -> Vec<PathBuf> {
     // Chocolatey package manager directories
     if let Some(choco_path) = env::var_os("ChocolateyInstall") {
         dirs.push(PathBuf::from(choco_path).join("lib"));
+        dirs.push(PathBuf::from(choco_path).join("bin"));
     }
     dirs.push(PathBuf::from("C:\\ProgramData\\chocolatey\\lib"));
+    dirs.push(PathBuf::from("C:\\ProgramData\\chocolatey\\bin"));
 
     dirs
 }
@@ -631,43 +656,59 @@ mod tests {
 
     #[test]
     fn test_determine_installation_source() {
+        use std::path::Path;
+        
         // Test Scoop installation source detection
         assert_eq!(
-            determine_installation_source(&PathBuf::from("C:\\Users\\user\\scoop\\apps")),
+            determine_installation_source(Path::new("C:\\Users\\user\\scoop\\apps")),
             "scoop"
         );
         assert_eq!(
-            determine_installation_source(&PathBuf::from("D:\\scoop\\apps")),
+            determine_installation_source(Path::new("D:\\scoop\\apps")),
             "scoop"
         );
 
         // Test Chocolatey installation source detection
         assert_eq!(
-            determine_installation_source(&PathBuf::from("C:\\ProgramData\\chocolatey\\lib")),
+            determine_installation_source(Path::new("C:\\ProgramData\\chocolatey\\lib")),
             "chocolatey"
         );
         assert_eq!(
-            determine_installation_source(&PathBuf::from("C:\\tools\\chocolatey\\lib")),
+            determine_installation_source(Path::new("C:\\tools\\chocolatey\\lib")),
+            "chocolatey"
+        );
+        assert_eq!(
+            determine_installation_source(Path::new("C:\\ProgramData\\chocolatey\\bin")),
             "chocolatey"
         );
 
         // Test traditional Windows installation source detection
         assert_eq!(
-            determine_installation_source(&PathBuf::from("C:\\Program Files")),
+            determine_installation_source(Path::new("C:\\Program Files")),
             "windows"
         );
         assert_eq!(
-            determine_installation_source(&PathBuf::from("C:\\Program Files (x86)")),
+            determine_installation_source(Path::new("C:\\Program Files (x86)")),
             "windows"
         );
         assert_eq!(
-            determine_installation_source(&PathBuf::from("C:\\Users\\user\\AppData\\Local")),
+            determine_installation_source(Path::new("C:\\Users\\user\\AppData\\Local")),
             "windows"
         );
 
         // Test unknown paths default to "windows"
         assert_eq!(
-            determine_installation_source(&PathBuf::from("C:\\CustomPath")),
+            determine_installation_source(Path::new("C:\\CustomPath")),
+            "windows"
+        );
+        
+        // Test edge cases that should not be misclassified
+        assert_eq!(
+            determine_installation_source(Path::new("C:\\work\\scoopkit")),
+            "windows"
+        );
+        assert_eq!(
+            determine_installation_source(Path::new("C:\\mychocolatey\\app")),
             "windows"
         );
     }
