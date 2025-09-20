@@ -36,19 +36,27 @@ INFO_TEMPLATE="$PKG_DIR/Info.plist"
 ENTITLEMENTS_FILE="$PKG_DIR/PathwayShim.entitlements"
 SWIFT_SRC="$PKG_DIR/PathwayShim.swift"
 ICON_SRC="$ROOT_DIR/assets/pathway-logo.png"
+ICONSET_DIR="$BUILD_DIR/icon.iconset"
 SDK_PATH="$(xcrun --sdk macosx --show-sdk-path)"
 
 mkdir -p "$BUILD_DIR" "$DIST_DIR"
 rm -rf "$APP_BUNDLE"
 mkdir -p "$APP_BUNDLE/Contents/MacOS" "$APP_BUNDLE/Contents/Resources"
 
-VERSION=$(cd "$ROOT_DIR" && python3 - <<'PY'
-import pathlib
-import re
+VERSION=$(
+  cd "$CORE_DIR" && python3 - <<'PY'
+import json
+import subprocess
 
-toml_text = pathlib.Path("core/Cargo.toml").read_text()
-match = re.search(r'^version\s*=\s*"([^"]+)"', toml_text, re.MULTILINE)
-print(match.group(1) if match else "0.0.0")
+metadata = subprocess.run(
+    ["cargo", "metadata", "--no-deps", "--format-version=1"],
+    check=True,
+    capture_output=True,
+    text=True,
+).stdout
+data = json.loads(metadata)
+packages = data.get("packages", [])
+print(packages[0]["version"] if packages else "0.0.0")
 PY
 )
 
@@ -59,14 +67,18 @@ cargo build --release --target aarch64-apple-darwin
 cargo build --release --target x86_64-apple-darwin
 popd >/dev/null
 
+TMP_UNIV="$BUILD_DIR/pathway-universal"
 lipo -create \
   "$CORE_DIR/target/aarch64-apple-darwin/release/pathway" \
   "$CORE_DIR/target/x86_64-apple-darwin/release/pathway" \
-  -output "$APP_BUNDLE/Contents/Resources/pathway"
-chmod +x "$APP_BUNDLE/Contents/Resources/pathway"
+  -output "$TMP_UNIV"
+install -m 755 "$TMP_UNIV" "$APP_BUNDLE/Contents/Resources/pathway"
+rm -f "$TMP_UNIV"
 
 SWIFT_ARM="$BUILD_DIR/PathwayShim-arm64"
 SWIFT_X86="$BUILD_DIR/PathwayShim-x86_64"
+cleanup() { rm -f "$SWIFT_ARM" "$SWIFT_X86"; rm -rf "$ICONSET_DIR"; }
+trap cleanup EXIT
 
 swiftc -parse-as-library -O -sdk "$SDK_PATH" -target arm64-apple-macos11 "$SWIFT_SRC" -o "$SWIFT_ARM"
 swiftc -parse-as-library -O -sdk "$SDK_PATH" -target x86_64-apple-macos10.15 "$SWIFT_SRC" -o "$SWIFT_X86"
@@ -79,25 +91,29 @@ rm -f "$SWIFT_ARM" "$SWIFT_X86"
 plutil -lint "$APP_BUNDLE/Contents/Info.plist" >/dev/null
 
 if [[ -f "$ICON_SRC" ]]; then
-  ICONSET_DIR="$BUILD_DIR/icon.iconset"
   rm -rf "$ICONSET_DIR"
   mkdir -p "$ICONSET_DIR"
-  declare -a SIZES=(16 32 64 128 256 512)
-  for SIZE in "${SIZES[@]}"; do
+  declare -a BASE_SIZES=(16 32 128 256 512)
+  for SIZE in "${BASE_SIZES[@]}"; do
     sips -z "$SIZE" "$SIZE" "$ICON_SRC" --out "$ICONSET_DIR/icon_${SIZE}x${SIZE}.png" >/dev/null
-    DOUBLE=$((SIZE * 2))
-    sips -z "$DOUBLE" "$DOUBLE" "$ICON_SRC" --out "$ICONSET_DIR/icon_${SIZE}x${SIZE}@2x.png" >/dev/null
+    sips -z "$((SIZE * 2))" "$((SIZE * 2))" "$ICON_SRC" --out "$ICONSET_DIR/icon_${SIZE}x${SIZE}@2x.png" >/dev/null
   done
   iconutil -c icns "$ICONSET_DIR" -o "$APP_BUNDLE/Contents/Resources/icon.icns"
+  rm -rf "$ICONSET_DIR"
 fi
 
+IDENTITY="${CODESIGN_IDENTITY:--}"
 if [[ -f "$ENTITLEMENTS_FILE" ]]; then
-  codesign --force --deep --sign - --entitlements "$ENTITLEMENTS_FILE" "$APP_BUNDLE"
+  codesign --force --sign "$IDENTITY" --entitlements "$ENTITLEMENTS_FILE" "$APP_BUNDLE/Contents/Resources/pathway"
+  codesign --force --sign "$IDENTITY" --entitlements "$ENTITLEMENTS_FILE" "$APP_BUNDLE/Contents/MacOS/PathwayShim"
+  codesign --force --sign "$IDENTITY" --entitlements "$ENTITLEMENTS_FILE" "$APP_BUNDLE"
 else
-  codesign --force --deep --sign - "$APP_BUNDLE"
+  codesign --force --sign "$IDENTITY" "$APP_BUNDLE/Contents/Resources/pathway"
+  codesign --force --sign "$IDENTITY" "$APP_BUNDLE/Contents/MacOS/PathwayShim"
+  codesign --force --sign "$IDENTITY" "$APP_BUNDLE"
 fi
 
-codesign --verify --deep --strict "$APP_BUNDLE"
+codesign --verify --strict --verbose=2 "$APP_BUNDLE"
 
 OUTPUT_ZIP="$DIST_DIR/Pathway-${VERSION}.zip"
 rm -f "$OUTPUT_ZIP"
