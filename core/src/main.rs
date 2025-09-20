@@ -41,8 +41,12 @@ enum Commands {
         channel: Option<BrowserChannelArg>,
 
         /// Use system default browser
-        #[arg(long)]
+        #[arg(long, conflicts_with_all = ["browser", "channel"])]
         system_default: bool,
+
+        /// Force fallback browser when no --browser is provided (prevents infinite loops when launched from app bundle)
+        #[arg(long, conflicts_with_all = ["system_default", "browser", "channel"])]
+        no_system_default: bool,
 
         /// Profile options (mutually exclusive)
         #[command(flatten)]
@@ -111,19 +115,19 @@ enum ProfileAction {
 #[group(required = false, multiple = false)]
 struct ProfileArgs {
     /// Use specific browser profile
-    #[arg(long)]
+    #[arg(long, conflicts_with_all = ["temp_profile", "guest"])]
     profile: Option<String>,
 
     /// Use custom user data directory
-    #[arg(long)]
+    #[arg(long, conflicts_with_all = ["temp_profile", "guest"])]
     user_dir: Option<PathBuf>,
 
     /// Create temporary profile (deleted on exit)
-    #[arg(long)]
+    #[arg(long, conflicts_with_all = ["profile", "user_dir", "guest"])]
     temp_profile: bool,
 
     /// Use guest profile (Chromium only)
-    #[arg(long)]
+    #[arg(long, conflicts_with_all = ["profile", "user_dir", "temp_profile"])]
     guest: bool,
 }
 
@@ -254,15 +258,47 @@ struct ProfileInfoResponse {
     profile: ProfileInfo,
 }
 
+#[derive(Debug, Serialize)]
+struct ProfileErrorResponse {
+    action: &'static str,
+    browser: String,
+    message: String,
+}
+
 struct LaunchCommandParams {
     urls: Vec<String>,
     browser: Option<String>,
     channel: Option<BrowserChannelArg>,
     system_default: bool,
+    no_system_default: bool,
     profile_args: ProfileArgs,
     window_args: WindowArgs,
     no_launch: bool,
     format: OutputFormat,
+}
+
+/// Get a safe fallback browser when infinite loop prevention is needed.
+/// Uses OS-appropriate browser preferences for reliability.
+fn get_fallback_browser(inventory: &BrowserInventory) -> Option<&BrowserInfo> {
+    // OS-specific fallback preferences
+    let fallback_preferences = if cfg!(target_os = "macos") {
+        &["safari", "chrome", "firefox"][..]
+    } else if cfg!(target_os = "windows") {
+        &["edge", "chrome", "firefox"][..]
+    } else {
+        // Linux and other platforms
+        &["chrome", "firefox", "chromium"][..]
+    };
+
+    // Try each preferred browser in order
+    for browser_name in fallback_preferences {
+        if let Some(browser) = find_browser(&inventory.browsers, browser_name, None) {
+            return Some(browser);
+        }
+    }
+
+    // Fallback to first available browser if preferred ones not found
+    inventory.browsers.first()
 }
 
 /// Entry point for the CLI executable.
@@ -303,6 +339,7 @@ fn main() {
             browser,
             channel,
             system_default,
+            no_system_default,
             profile,
             window,
             no_launch,
@@ -312,6 +349,7 @@ fn main() {
                 browser,
                 channel,
                 system_default,
+                no_system_default,
                 profile_args: profile,
                 window_args: window,
                 no_launch,
@@ -559,6 +597,7 @@ fn handle_launch_command(inventory: &BrowserInventory, params: LaunchCommandPara
         browser,
         channel,
         system_default,
+        no_system_default,
         profile_args,
         window_args,
         no_launch,
@@ -574,12 +613,29 @@ fn handle_launch_command(inventory: &BrowserInventory, params: LaunchCommandPara
     }
 
     let requested_channel = channel.map(Into::into);
-    let selected_browser = select_browser(
+    let mut selected_browser = select_browser(
         inventory,
         browser.as_deref(),
         requested_channel,
         system_default,
     );
+
+    // Force fallback browser when --no-system-default is used
+    let mut is_fallback = false;
+    if no_system_default && selected_browser.is_none() {
+        selected_browser = get_fallback_browser(inventory);
+        is_fallback = true;
+
+        if selected_browser.is_none() {
+            let error_msg = "No fallback browser available";
+            if format == OutputFormat::Human {
+                error!("{}", error_msg);
+            } else {
+                print_launch_error_json(&normalized_urls, &results, error_msg);
+            }
+            process::exit(1);
+        }
+    }
 
     let additional_warnings = generate_browser_warnings(
         &browser,
@@ -587,6 +643,7 @@ fn handle_launch_command(inventory: &BrowserInventory, params: LaunchCommandPara
         requested_channel,
         inventory,
         format,
+        is_fallback,
     );
 
     let (profile_options, window_options, mut warnings) =
@@ -594,9 +651,14 @@ fn handle_launch_command(inventory: &BrowserInventory, params: LaunchCommandPara
 
     warnings.extend(additional_warnings);
 
-    let launch_target = selected_browser
-        .map(LaunchTarget::Browser)
-        .unwrap_or(LaunchTarget::SystemDefault);
+    let launch_target = if is_fallback {
+        // Use the fallback browser directly instead of system default
+        LaunchTarget::Browser(selected_browser.unwrap())
+    } else {
+        selected_browser
+            .map(LaunchTarget::Browser)
+            .unwrap_or(LaunchTarget::SystemDefault)
+    };
 
     if no_launch {
         let response_data = LaunchResponseData {
@@ -690,23 +752,18 @@ fn execute_launch_and_respond(
                             .map(BrowserJson::from_system_default)
                     });
 
-                let response = LaunchJsonResponse {
-                    action: "launch",
-                    status: "success",
-                    urls: response_data.normalized_urls.to_vec(),
-                    url: response_data.normalized_urls.first().cloned(),
-                    validated: response_data.results.to_vec(),
-                    warnings: if response_data.warnings.is_empty() {
-                        None
-                    } else {
-                        Some(response_data.warnings.to_vec())
-                    },
-                    browser: browser_json,
-                    profile: Some(ProfileJson::from_profile_options(profile_options)),
-                    window_options: Some(WindowOptionsJson::from_window_options(window_options)),
-                    command: Some(outcome.command.clone()),
-                    message: None,
-                };
+                let response = build_launch_json_response(
+                    "success",
+                    response_data.normalized_urls,
+                    response_data.results,
+                    response_data.warnings,
+                    browser_json,
+                    response_data.selected_browser,
+                    profile_options,
+                    window_options,
+                    Some(outcome.command.clone()),
+                    None,
+                );
                 println!("{}", serde_json::to_string_pretty(&response).unwrap());
             }
         }
@@ -724,23 +781,18 @@ fn execute_launch_and_respond(
                         ))
                     });
 
-                let response = LaunchJsonResponse {
-                    action: "launch",
-                    status: "error",
-                    urls: response_data.normalized_urls.to_vec(),
-                    url: response_data.normalized_urls.first().cloned(),
-                    validated: response_data.results.to_vec(),
-                    warnings: if response_data.warnings.is_empty() {
-                        None
-                    } else {
-                        Some(response_data.warnings.to_vec())
-                    },
-                    browser: browser_json,
-                    profile: Some(ProfileJson::from_profile_options(profile_options)),
-                    window_options: Some(WindowOptionsJson::from_window_options(window_options)),
-                    command: None,
-                    message: Some(message.clone()),
-                };
+                let response = build_launch_json_response(
+                    "error",
+                    response_data.normalized_urls,
+                    response_data.results,
+                    response_data.warnings,
+                    browser_json,
+                    response_data.selected_browser,
+                    profile_options,
+                    window_options,
+                    None,
+                    Some(message.clone()),
+                );
                 println!("{}", serde_json::to_string_pretty(&response).unwrap());
             }
             process::exit(1);
@@ -936,6 +988,8 @@ fn handle_profile_command(
 
             if format == OutputFormat::Human {
                 error!("{}", error_msg);
+            } else {
+                print_profile_error_json("profile-error", browser_name, error_msg);
             }
             process::exit(1);
         }
@@ -989,6 +1043,12 @@ fn handle_profile_command(
                     let error_msg = format!("Failed to discover profiles: {}", e);
                     if format == OutputFormat::Human {
                         error!("{}", error_msg);
+                    } else {
+                        print_profile_error_json(
+                            "list-profiles",
+                            browser.display_name.as_str(),
+                            error_msg,
+                        );
                     }
                     process::exit(1);
                 }
@@ -1022,6 +1082,12 @@ fn handle_profile_command(
                     let error_msg = format!("Profile '{}' not found: {}", name, e);
                     if format == OutputFormat::Human {
                         error!("{}", error_msg);
+                    } else {
+                        print_profile_error_json(
+                            "profile-info",
+                            browser.display_name.as_str(),
+                            error_msg,
+                        );
                     }
                     process::exit(1);
                 }
@@ -1264,6 +1330,73 @@ impl WindowOptionsJson {
     }
 }
 
+fn print_profile_error_json(action: &'static str, browser: &str, message: String) {
+    let resp = ProfileErrorResponse {
+        action,
+        browser: browser.to_string(),
+        message,
+    };
+    println!("{}", serde_json::to_string_pretty(&resp).unwrap());
+}
+
+fn print_launch_error_json(normalized_urls: &[String], results: &[ValidatedUrl], message: &str) {
+    let response = LaunchJsonResponse {
+        action: "launch",
+        status: "error",
+        urls: normalized_urls.to_vec(),
+        url: normalized_urls.first().cloned(),
+        validated: results.to_vec(),
+        warnings: None,
+        browser: None,
+        profile: None,
+        window_options: None,
+        command: None,
+        message: Some(message.to_string()),
+    };
+    println!("{}", serde_json::to_string_pretty(&response).unwrap());
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_launch_json_response(
+    status: &'static str,
+    urls: &[String],
+    results: &[ValidatedUrl],
+    warnings: &[String],
+    browser_json: Option<BrowserJson>,
+    selected_browser: Option<&BrowserInfo>,
+    profile_options: &ProfileOptions,
+    window_options: &WindowOptions,
+    command: Option<LaunchCommand>,
+    message: Option<String>,
+) -> LaunchJsonResponse {
+    let include_opts = selected_browser.is_some();
+    LaunchJsonResponse {
+        action: "launch",
+        status,
+        urls: urls.to_vec(),
+        url: urls.first().cloned(),
+        validated: results.to_vec(),
+        warnings: if warnings.is_empty() {
+            None
+        } else {
+            Some(warnings.to_vec())
+        },
+        browser: browser_json,
+        profile: if include_opts {
+            Some(ProfileJson::from_profile_options(profile_options))
+        } else {
+            None
+        },
+        window_options: if include_opts {
+            Some(WindowOptionsJson::from_window_options(window_options))
+        } else {
+            None
+        },
+        command,
+        message,
+    }
+}
+
 /// Returns a short human-readable description of the selected profile option suitable for appending
 /// to a launch message (e.g., " with profile 'name'", " in guest mode").
 ///
@@ -1321,8 +1454,27 @@ fn generate_browser_warnings(
     requested_channel: Option<BrowserChannel>,
     inventory: &BrowserInventory,
     format: OutputFormat,
+    is_fallback: bool,
 ) -> Vec<String> {
     let mut warnings = Vec::new();
+
+    if is_fallback {
+        debug_assert!(
+            selected_browser.is_some(),
+            "fallback should always resolve a browser"
+        );
+        let fallback_name = selected_browser
+            .map(|b| b.display_name.as_str())
+            .unwrap_or("<unreachable>");
+        let warning = format!(
+            "Using {} instead of system default (--no-system-default was specified)",
+            fallback_name
+        );
+        if format == OutputFormat::Human {
+            warn!("{}", warning);
+        }
+        warnings.push(warning);
+    }
 
     if browser.is_some() && selected_browser.is_none() {
         let mut warning = format!("Browser '{}' not found", browser.as_deref().unwrap());
@@ -1371,23 +1523,18 @@ fn handle_no_launch_response(
                 BrowserJson::from_system_default(&response_data.inventory.system_default)
             });
 
-        let response = LaunchJsonResponse {
-            action: "launch",
-            status: "skipped",
-            urls: response_data.normalized_urls.to_vec(),
-            url: response_data.normalized_urls.first().cloned(),
-            validated: response_data.results.to_vec(),
-            warnings: if response_data.warnings.is_empty() {
-                None
-            } else {
-                Some(response_data.warnings.to_vec())
-            },
-            browser: Some(browser_json),
-            profile: Some(ProfileJson::from_profile_options(profile_options)),
-            window_options: Some(WindowOptionsJson::from_window_options(window_options)),
-            command: None,
-            message: Some("Launch skipped (--no-launch)".to_string()),
-        };
+        let response = build_launch_json_response(
+            "skipped",
+            response_data.normalized_urls,
+            response_data.results,
+            response_data.warnings,
+            Some(browser_json),
+            response_data.selected_browser,
+            profile_options,
+            window_options,
+            None,
+            Some("Launch skipped (--no-launch)".to_string()),
+        );
         println!("{}", serde_json::to_string_pretty(&response).unwrap());
     }
 }

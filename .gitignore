@@ -49,3 +49,5 @@ Desktop.ini
 # Binary releases
 /dist/
 /releases/
+packaging/macos/build/
+packaging/macos/dist/
