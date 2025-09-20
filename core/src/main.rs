@@ -792,7 +792,17 @@ fn handle_browser_command(
                             .bundle_path
                             .as_ref()
                             .or(browser.executable.as_ref())
-                            .map(|p| p.display().to_string())
+                            .map(|p| {
+                                // Normalize path separators for consistent display on Windows
+                                #[cfg(windows)]
+                                {
+                                    p.display().to_string().replace('/', "\\")
+                                }
+                                #[cfg(not(windows))]
+                                {
+                                    p.display().to_string()
+                                }
+                            })
                             .unwrap_or_else(|| "(unknown path)".to_string());
 
                         if let Some(bundle_id) = &browser.bundle_id {
