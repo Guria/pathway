@@ -258,6 +258,13 @@ struct ProfileInfoResponse {
     profile: ProfileInfo,
 }
 
+#[derive(Debug, Serialize)]
+struct ProfileErrorResponse {
+    action: &'static str,
+    browser: String,
+    message: String,
+}
+
 struct LaunchCommandParams {
     urls: Vec<String>,
     browser: Option<String>,
@@ -606,12 +613,11 @@ fn handle_launch_command(inventory: &BrowserInventory, params: LaunchCommandPara
     }
 
     let requested_channel = channel.map(Into::into);
-    let effective_system_default = system_default && !no_system_default;
     let mut selected_browser = select_browser(
         inventory,
         browser.as_deref(),
         requested_channel,
-        effective_system_default,
+        system_default,
     );
 
     // Force fallback browser when --no-system-default is used
@@ -759,6 +765,7 @@ fn execute_launch_and_respond(
                             .map(BrowserJson::from_system_default)
                     });
 
+                let include_opts = response_data.selected_browser.is_some();
                 let response = LaunchJsonResponse {
                     action: "launch",
                     status: "success",
@@ -771,8 +778,16 @@ fn execute_launch_and_respond(
                         Some(response_data.warnings.to_vec())
                     },
                     browser: browser_json,
-                    profile: Some(ProfileJson::from_profile_options(profile_options)),
-                    window_options: Some(WindowOptionsJson::from_window_options(window_options)),
+                    profile: if include_opts {
+                        Some(ProfileJson::from_profile_options(profile_options))
+                    } else {
+                        None
+                    },
+                    window_options: if include_opts {
+                        Some(WindowOptionsJson::from_window_options(window_options))
+                    } else {
+                        None
+                    },
                     command: Some(outcome.command.clone()),
                     message: None,
                 };
@@ -793,6 +808,7 @@ fn execute_launch_and_respond(
                         ))
                     });
 
+                let include_opts = response_data.selected_browser.is_some();
                 let response = LaunchJsonResponse {
                     action: "launch",
                     status: "error",
@@ -805,8 +821,16 @@ fn execute_launch_and_respond(
                         Some(response_data.warnings.to_vec())
                     },
                     browser: browser_json,
-                    profile: Some(ProfileJson::from_profile_options(profile_options)),
-                    window_options: Some(WindowOptionsJson::from_window_options(window_options)),
+                    profile: if include_opts {
+                        Some(ProfileJson::from_profile_options(profile_options))
+                    } else {
+                        None
+                    },
+                    window_options: if include_opts {
+                        Some(WindowOptionsJson::from_window_options(window_options))
+                    } else {
+                        None
+                    },
                     command: None,
                     message: Some(message.clone()),
                 };
@@ -1005,6 +1029,8 @@ fn handle_profile_command(
 
             if format == OutputFormat::Human {
                 error!("{}", error_msg);
+            } else {
+                print_profile_error_json("profile-error", browser_name, error_msg);
             }
             process::exit(1);
         }
@@ -1058,6 +1084,12 @@ fn handle_profile_command(
                     let error_msg = format!("Failed to discover profiles: {}", e);
                     if format == OutputFormat::Human {
                         error!("{}", error_msg);
+                    } else {
+                        print_profile_error_json(
+                            "list-profiles",
+                            browser.display_name.as_str(),
+                            error_msg,
+                        );
                     }
                     process::exit(1);
                 }
@@ -1091,6 +1123,12 @@ fn handle_profile_command(
                     let error_msg = format!("Profile '{}' not found: {}", name, e);
                     if format == OutputFormat::Human {
                         error!("{}", error_msg);
+                    } else {
+                        print_profile_error_json(
+                            "profile-info",
+                            browser.display_name.as_str(),
+                            error_msg,
+                        );
                     }
                     process::exit(1);
                 }
@@ -1333,6 +1371,15 @@ impl WindowOptionsJson {
     }
 }
 
+fn print_profile_error_json(action: &'static str, browser: &str, message: String) {
+    let resp = ProfileErrorResponse {
+        action,
+        browser: browser.to_string(),
+        message,
+    };
+    println!("{}", serde_json::to_string_pretty(&resp).unwrap());
+}
+
 /// Returns a short human-readable description of the selected profile option suitable for appending
 /// to a launch message (e.g., " with profile 'name'", " in guest mode").
 ///
@@ -1459,6 +1506,7 @@ fn handle_no_launch_response(
                 BrowserJson::from_system_default(&response_data.inventory.system_default)
             });
 
+        let include_opts = response_data.selected_browser.is_some();
         let response = LaunchJsonResponse {
             action: "launch",
             status: "skipped",
@@ -1471,8 +1519,16 @@ fn handle_no_launch_response(
                 Some(response_data.warnings.to_vec())
             },
             browser: Some(browser_json),
-            profile: Some(ProfileJson::from_profile_options(profile_options)),
-            window_options: Some(WindowOptionsJson::from_window_options(window_options)),
+            profile: if include_opts {
+                Some(ProfileJson::from_profile_options(profile_options))
+            } else {
+                None
+            },
+            window_options: if include_opts {
+                Some(WindowOptionsJson::from_window_options(window_options))
+            } else {
+                None
+            },
             command: None,
             message: Some("Launch skipped (--no-launch)".to_string()),
         };
