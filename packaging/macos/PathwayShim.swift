@@ -60,8 +60,8 @@ final class PathwayAppDelegate: NSObject, NSApplicationDelegate {
             self.pendingLaunches += 1
             let process = Process()
             process.executableURL = pathwayURL
-            // Pathway CLI requires the `launch` subcommand and system-default flag.
-            process.arguments = ["launch", "--system-default"] + urls.map { $0.absoluteString }
+            // Pathway CLI requires the `launch` subcommand.
+            process.arguments = ["launch"] + urls.map { $0.absoluteString }
             self.activeProcesses.append(process)
 
             var environment = ProcessInfo.processInfo.environment
