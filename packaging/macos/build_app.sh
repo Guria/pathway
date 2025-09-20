@@ -68,8 +68,8 @@ chmod +x "$APP_BUNDLE/Contents/Resources/pathway"
 SWIFT_ARM="$BUILD_DIR/PathwayShim-arm64"
 SWIFT_X86="$BUILD_DIR/PathwayShim-x86_64"
 
-swiftc -O -sdk "$SDK_PATH" -target arm64-apple-macos11 "$SWIFT_SRC" -o "$SWIFT_ARM"
-swiftc -O -sdk "$SDK_PATH" -target x86_64-apple-macos10.15 "$SWIFT_SRC" -o "$SWIFT_X86"
+swiftc -parse-as-library -O -sdk "$SDK_PATH" -target arm64-apple-macos11 "$SWIFT_SRC" -o "$SWIFT_ARM"
+swiftc -parse-as-library -O -sdk "$SDK_PATH" -target x86_64-apple-macos10.15 "$SWIFT_SRC" -o "$SWIFT_X86"
 
 lipo -create "$SWIFT_ARM" "$SWIFT_X86" -output "$APP_BUNDLE/Contents/MacOS/PathwayShim"
 chmod +x "$APP_BUNDLE/Contents/MacOS/PathwayShim"
