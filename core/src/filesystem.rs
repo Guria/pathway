@@ -79,13 +79,16 @@ mod tests {
         let fs = RealFileSystem;
 
         // Test that exists delegates to Path::exists
-        // Use root path which should always exist
-        assert!(fs.exists(Path::new("/")));
-
-        // Test canonicalize with current directory
+        // Use current directory which should always exist
         let current_dir = std::env::current_dir().unwrap();
+        assert!(fs.exists(&current_dir));
+
+        // Test canonicalize - verify it returns a canonical form
+        // On Windows, canonicalize may return UNC paths, so we just verify it succeeds
+        // and that the canonical path exists
         let canonical = fs.canonicalize(&current_dir).unwrap();
-        assert_eq!(canonical, current_dir);
+        assert!(canonical.is_absolute());
+        assert!(fs.exists(&canonical));
     }
 
     #[test]
