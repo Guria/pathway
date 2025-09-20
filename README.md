@@ -60,6 +60,23 @@ pathway launch --browser chrome https://github.com https://stackoverflow.com
 
 ## 📦 Installation
 
+### macOS App Bundle (Native)
+Download the pre-built macOS app bundle or build from source:
+
+```bash
+# Build macOS app bundle (requires Xcode command line tools)
+./packaging/macos/build_app.sh
+
+# Install the generated .pkg file or drag Pathway.app to Applications
+```
+
+The macOS app bundle provides:
+- Native macOS integration with URL scheme handling
+- Ability to set Pathway as default browser
+- Proper app bundle packaging with code signing support
+- Both manual (.zip) and installer (.pkg) distribution formats
+
+### Command Line (Cross-platform)
 ```bash
 # Clone and build
 git clone https://github.com/guria/pathway.git
@@ -134,6 +151,34 @@ All commands support `--format json` for programmatic integration:
   }
 }
 ```
+
+## 📋 Current Milestone: macOS Native App Bundle
+
+**Status:** ✅ **Completed** - Full macOS app bundle support with native integration
+
+### What's New
+- **Complete macOS App Bundle**: Native `.app` bundle with proper Info.plist configuration
+- **Swift URL Handler Shim**: PathwayShim.swift provides seamless URL scheme handling
+- **Installer Package Creation**: Automated `.pkg` installer generation for easy distribution
+- **Default Browser Integration**: Can be set as system default browser with infinite loop protection
+- **Enhanced Build Pipeline**: Automated CI/CD workflow for macOS app builds
+- **Robust Error Handling**: Improved logging and error management throughout the system
+
+### Technical Implementation
+- Added `packaging/macos/` directory with complete build infrastructure
+- Swift shim application handles URL events and forwards to Rust CLI
+- Automated build script creates both ZIP archives and PKG installers
+- Enhanced conflict resolution for system default browser scenarios
+- OSLog-compatible logging for macOS 10.15+ compatibility
+
+### Files Added/Modified
+- `packaging/macos/build_app.sh` - Complete app bundle build automation
+- `packaging/macos/PathwayShim.swift` - Swift URL handling application
+- `packaging/macos/Info.plist` - macOS app bundle metadata
+- `packaging/macos/PathwayShim.entitlements` - Code signing entitlements
+- Enhanced CI workflows for macOS builds
+
+---
 
 ## 🛠️ Development
 

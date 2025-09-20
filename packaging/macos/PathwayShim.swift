@@ -74,7 +74,7 @@ final class PathwayShim: NSObject, NSApplicationDelegate {
             process.arguments = ["launch", "--no-system-default"] + urls.map { $0.absoluteString }
             self.activeProcesses.append(process)
 
-            var environment = ProcessInfo.processInfo.environment
+            let environment = ProcessInfo.processInfo.environment
             process.environment = environment
 
             process.standardInput = FileHandle.nullDevice
