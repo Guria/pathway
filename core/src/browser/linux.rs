@@ -578,9 +578,6 @@ mod tests {
         perms.set_mode(0o755); // rwxr-xr-x
         temp_file.as_file().set_permissions(perms).unwrap();
 
-        // Capture the metadata from our executable temp file
-        let executable_metadata = temp_file.as_file().metadata().unwrap();
-
         let mut mock_fs = MockFileSystem::new();
 
         // Mock that only Chrome exists and is executable
@@ -588,11 +585,16 @@ mod tests {
             .expect_exists()
             .returning(|path| path == Path::new("/usr/bin/google-chrome"));
 
-        // Mock executable permissions check for Chrome using our temp file's metadata
+        // Mock executable permissions check for Chrome using fresh metadata from temp file
         mock_fs
             .expect_metadata()
             .with(mockall::predicate::eq(Path::new("/usr/bin/google-chrome")))
-            .returning(move |_| Ok(executable_metadata.clone()));
+            .returning(move |_| {
+                // Return fresh metadata from the temp file each time
+                temp_file.as_file().metadata().map_err(|_| {
+                    std::io::Error::new(std::io::ErrorKind::NotFound, "mock metadata error")
+                })
+            });
 
         let browsers = detect_browsers(&mock_fs);
 
