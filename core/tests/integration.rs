@@ -1,6 +1,7 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
 use tempfile::TempDir;
+use url::Url;
 
 #[test]
 fn test_launch_https_url() {
@@ -55,7 +56,10 @@ fn test_launch_file_url_with_tempfile() {
     std::fs::write(&test_file, "<html><body>Hello World</body></html>")
         .expect("Failed to create test file");
 
-    let file_url = format!("file://{}", test_file.display());
+    // Use proper file URL construction for cross-platform compatibility
+    let file_url = Url::from_file_path(&test_file)
+        .expect("Failed to create file URL")
+        .to_string();
 
     let mut cmd = Command::cargo_bin("pathway").unwrap();
     cmd.args(["launch", "--no-launch", &file_url])

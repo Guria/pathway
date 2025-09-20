@@ -1,6 +1,7 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
 use tempfile::TempDir;
+use url::Url;
 
 #[test]
 fn test_browser_list() {
@@ -77,7 +78,10 @@ fn test_file_url_with_tempfile() {
     std::fs::write(&test_file, "<html><body>Test</body></html>")
         .expect("Failed to create test file");
 
-    let file_url = format!("file://{}", test_file.display());
+    // Use proper file URL construction for cross-platform compatibility
+    let file_url = Url::from_file_path(&test_file)
+        .expect("Failed to create file URL")
+        .to_string();
 
     let mut cmd = Command::cargo_bin("pathway").unwrap();
     cmd.args(["launch", "--no-launch", &file_url])
@@ -90,7 +94,11 @@ fn test_file_url_with_tempfile() {
 fn test_file_url_nonexistent() {
     let temp_dir = TempDir::new().expect("Failed to create temporary directory");
     let nonexistent_file = temp_dir.path().join("nonexistent.html");
-    let file_url = format!("file://{}", nonexistent_file.display());
+    
+    // Use proper file URL construction for cross-platform compatibility
+    let file_url = Url::from_file_path(&nonexistent_file)
+        .expect("Failed to create file URL")
+        .to_string();
 
     let mut cmd = Command::cargo_bin("pathway").unwrap();
     cmd.args(["launch", "--no-launch", &file_url])
