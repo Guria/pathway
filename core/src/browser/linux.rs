@@ -564,10 +564,23 @@ fn query_default_desktop_entry() -> Option<String> {
 mod tests {
     use super::*;
     use crate::filesystem::MockFileSystem;
+    use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
+    use tempfile::NamedTempFile;
 
     #[test]
     fn test_browser_detection_with_mock_fs() {
+        // Create a temporary executable file to get proper metadata
+        let temp_file = NamedTempFile::new().expect("Failed to create temporary file");
+
+        // Set executable permissions on the temp file
+        let mut perms = temp_file.as_file().metadata().unwrap().permissions();
+        perms.set_mode(0o755); // rwxr-xr-x
+        temp_file.as_file().set_permissions(perms).unwrap();
+
+        // Capture the metadata from our executable temp file
+        let executable_metadata = temp_file.as_file().metadata().unwrap();
+
         let mut mock_fs = MockFileSystem::new();
 
         // Mock that only Chrome exists and is executable
@@ -575,14 +588,11 @@ mod tests {
             .expect_exists()
             .returning(|path| path == Path::new("/usr/bin/google-chrome"));
 
-        // Mock executable permissions check for Chrome
+        // Mock executable permissions check for Chrome using our temp file's metadata
         mock_fs
             .expect_metadata()
             .with(mockall::predicate::eq(Path::new("/usr/bin/google-chrome")))
-            .returning(|_| {
-                std::fs::metadata("/")
-                    .map_err(|_| std::io::Error::new(std::io::ErrorKind::NotFound, "mock"))
-            });
+            .returning(move |_| Ok(executable_metadata.clone()));
 
         let browsers = detect_browsers(&mock_fs);
 
