@@ -154,43 +154,90 @@ fn contains_path_traversal(path: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::filesystem::mock::MockFileSystem;
+    use crate::filesystem::MockFileSystem;
 
     #[test]
     fn test_valid_urls() {
-        let fs = MockFileSystem::new();
-        assert!(validate_url_with_fs("https://example.com", &fs).is_ok());
-        assert!(validate_url_with_fs("http://localhost:3000/api", &fs).is_ok());
+        let mut mock_fs = MockFileSystem::new();
+
+        // Setup mock expectations for file URL test
+        mock_fs
+            .expect_exists()
+            .with(mockall::predicate::eq(std::path::Path::new("/etc/hosts")))
+            .return_const(true);
+        mock_fs
+            .expect_canonicalize()
+            .with(mockall::predicate::eq(std::path::Path::new("/etc/hosts")))
+            .returning(|path| Ok(path.to_path_buf()));
+
+        assert!(validate_url_with_fs("https://example.com", &mock_fs).is_ok());
+        assert!(validate_url_with_fs("http://localhost:3000/api", &mock_fs).is_ok());
 
         // Test file URL with mock file system
-        let mut fs = MockFileSystem::new();
-        fs.add_file("/etc/hosts", b"test content");
-        assert!(validate_url_with_fs("file:///etc/hosts", &fs).is_ok());
+        assert!(validate_url_with_fs("file:///etc/hosts", &mock_fs).is_ok());
     }
 
     #[test]
     fn test_auto_scheme_detection() {
-        let fs = MockFileSystem::new();
-        assert!(validate_url_with_fs("example.com", &fs).is_ok());
-        assert!(validate_url_with_fs("/tmp/test.html", &fs).is_ok());
-        assert!(validate_url_with_fs("./relative/path", &fs).is_ok());
+        let mut mock_fs = MockFileSystem::new();
+
+        // Mock exists calls to return false (file doesn't exist)
+        mock_fs.expect_exists().returning(|_| false);
+
+        // For auto-detection tests, we need to handle canonicalize calls for file paths
+        mock_fs.expect_canonicalize().returning(|path| {
+            // Return absolute path for relative paths
+            if path.is_absolute() {
+                Ok(path.to_path_buf())
+            } else {
+                Ok(std::env::current_dir().unwrap().join(path))
+            }
+        });
+
+        assert!(validate_url_with_fs("example.com", &mock_fs).is_ok());
+        assert!(validate_url_with_fs("/tmp/test.html", &mock_fs).is_ok());
+        assert!(validate_url_with_fs("./relative/path", &mock_fs).is_ok());
     }
 
     #[test]
     fn test_dangerous_schemes() {
-        let fs = MockFileSystem::new();
-        assert!(validate_url_with_fs("javascript:alert(1)", &fs).is_err());
-        assert!(validate_url_with_fs("data:text/html,<h1>test</h1>", &fs).is_err());
-        assert!(validate_url_with_fs("ftp://example.com", &fs).is_err());
+        let mock_fs = MockFileSystem::new();
+        assert!(validate_url_with_fs("javascript:alert(1)", &mock_fs).is_err());
+        assert!(validate_url_with_fs("data:text/html,<h1>test</h1>", &mock_fs).is_err());
+        assert!(validate_url_with_fs("ftp://example.com", &mock_fs).is_err());
     }
 
     #[test]
     fn test_path_traversal() {
-        let fs = MockFileSystem::new();
-        assert!(validate_url_with_fs("file:///../etc/passwd", &fs).is_err());
-        assert!(validate_url_with_fs("file:///tmp/../../../etc/passwd", &fs).is_err());
+        let mock_fs = MockFileSystem::new();
+        assert!(validate_url_with_fs("file:///../etc/passwd", &mock_fs).is_err());
+        assert!(validate_url_with_fs("file:///tmp/../../../etc/passwd", &mock_fs).is_err());
         // Test case-insensitive percent-encoding detection
-        assert!(validate_url_with_fs("file:///%2E%2E/etc/passwd", &fs).is_err());
-        assert!(validate_url_with_fs("file:///%2E%2E%2F../etc/passwd", &fs).is_err());
+        assert!(validate_url_with_fs("file:///%2E%2E/etc/passwd", &mock_fs).is_err());
+        assert!(validate_url_with_fs("file:///%2E%2E%2F../etc/passwd", &mock_fs).is_err());
+    }
+
+    #[test]
+    fn test_file_not_found_warning() {
+        let mut mock_fs = MockFileSystem::new();
+
+        // Setup mock to simulate file not existing
+        mock_fs
+            .expect_exists()
+            .with(mockall::predicate::eq(std::path::Path::new("/nonexistent")))
+            .return_const(false);
+        mock_fs
+            .expect_canonicalize()
+            .with(mockall::predicate::eq(std::path::Path::new("/nonexistent")))
+            .returning(|_| {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "File not found",
+                ))
+            });
+
+        let result = validate_url_with_fs("file:///nonexistent", &mock_fs).unwrap();
+        assert!(result.warning.is_some());
+        assert!(result.warning.unwrap().contains("File not found"));
     }
 }

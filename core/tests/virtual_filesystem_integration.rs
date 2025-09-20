@@ -2,9 +2,21 @@ use assert_cmd::Command;
 use predicates::prelude::*;
 use tempfile::TempDir;
 
+/// These tests demonstrate the improved approach where tests no longer
+/// depend on what browsers are actually installed on the host system.
+
+#[test]
+fn test_browser_list_isolated() {
+    // This test doesn't depend on what browsers are actually installed
+    // It just verifies the command structure works
+    let mut cmd = Command::cargo_bin("pathway").unwrap();
+    cmd.args(["browser", "list"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Detected browsers:"));
+}
+
 /// Test that uses temporary directories instead of relying on host file system state.
-/// This demonstrates the improved testing approach that doesn't depend on
-/// existing files or directories on the host system.
 #[test]
 fn test_profile_custom_dir_with_tempdir() {
     // Use a temporary directory that's automatically cleaned up
@@ -76,18 +88,6 @@ fn test_file_url_validation_nonexistent() {
         .stdout(predicate::str::contains(r#""status": "valid""#));
 }
 
-/// Test that browser detection works with mock browser installations
-#[test]
-fn test_browser_list_isolated() {
-    // This test doesn't depend on what browsers are actually installed
-    // It just verifies the command structure works
-    let mut cmd = Command::cargo_bin("pathway").unwrap();
-    cmd.args(["browser", "list"])
-        .assert()
-        .success()
-        .stderr(predicate::str::contains("Detected browsers:"));
-}
-
 /// Test launch command with explicit non-existent browser (should warn but not fail)
 #[test]
 fn test_launch_with_nonexistent_browser() {
@@ -120,4 +120,34 @@ fn test_temp_profile_cleanup() {
 
     // We can't easily test actual cleanup since temp profiles are created
     // but this test at least verifies the command structure works
+}
+
+/// Test browser checking with mock expectations
+#[test]
+fn test_browser_check_nonexistent() {
+    // Test checking for a browser that definitely doesn't exist
+    let mut cmd = Command::cargo_bin("pathway").unwrap();
+    cmd.args(["browser", "check", "definitely-not-a-browser-that-exists"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("not found"));
+}
+
+/// Demonstrate robust testing that doesn't rely on host browser state
+#[test]
+fn test_launch_with_format_json() {
+    // This test validates JSON output format without depending on specific browsers
+    let mut cmd = Command::cargo_bin("pathway").unwrap();
+    cmd.args([
+        "--format",
+        "json",
+        "launch",
+        "--no-launch",
+        "https://example.com",
+    ])
+    .assert()
+    .success()
+    .stdout(predicate::str::contains(r#""status": "valid""#))
+    .stdout(predicate::str::contains(r#""scheme": "https""#))
+    .stdout(predicate::str::contains(r#""action": "launch""#));
 }
