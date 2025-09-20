@@ -1,5 +1,5 @@
 import Cocoa
-import os.log
+import os
 
 private let subsystem = "dev.pathway.router"
 
