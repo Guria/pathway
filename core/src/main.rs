@@ -45,7 +45,7 @@ enum Commands {
         system_default: bool,
 
         /// Force fallback browser (prevents infinite loops when launched from app bundle)
-        #[arg(long)]
+        #[arg(long, conflicts_with = "system_default")]
         no_system_default: bool,
 
         /// Profile options (mutually exclusive)
@@ -606,11 +606,12 @@ fn handle_launch_command(inventory: &BrowserInventory, params: LaunchCommandPara
     }
 
     let requested_channel = channel.map(Into::into);
+    let effective_system_default = system_default && !no_system_default;
     let mut selected_browser = select_browser(
         inventory,
         browser.as_deref(),
         requested_channel,
-        system_default && !no_system_default,
+        effective_system_default,
     );
 
     // Force fallback browser when --no-system-default is used
