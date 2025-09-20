@@ -450,28 +450,35 @@ fn quote_windows_arg(arg: &str) -> String {
     if !needs_quoting {
         return arg.to_string();
     }
+
+    let contains_quotes = arg.contains('"');
     let mut out = String::with_capacity(arg.len() + 2);
     out.push('"');
     let mut backslashes = 0;
+
     for ch in arg.chars() {
         match ch {
             '\\' => backslashes += 1,
             '"' => {
-                // emit doubled backslashes before a quote, then escape the quote
-                out.extend(std::iter::repeat('\\').take(backslashes * 2 + 1));
+                // Double the backslashes before the quote, then add one more backslash to escape the quote
+                out.extend(std::iter::repeat_n('\\', backslashes * 2 + 1));
                 out.push('"');
                 backslashes = 0;
             }
             _ => {
-                // emit pending backslashes as-is
-                out.extend(std::iter::repeat('\\').take(backslashes));
+                // If the string contains quotes, double all backslashes to prevent misinterpretation
+                if contains_quotes {
+                    out.extend(std::iter::repeat_n('\\', backslashes * 2));
+                } else {
+                    out.extend(std::iter::repeat_n('\\', backslashes));
+                }
                 backslashes = 0;
                 out.push(ch);
             }
         }
     }
     // double trailing backslashes before the closing quote
-    out.extend(std::iter::repeat('\\').take(backslashes * 2));
+    out.extend(std::iter::repeat_n('\\', backslashes * 2));
     out.push('"');
     out
 }
