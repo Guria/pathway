@@ -55,13 +55,13 @@ pub fn detect_browsers<F: FileSystem>(fs: &F) -> Vec<BrowserInfo> {
 /// let sys = &inventory.system_default;
 /// println!("Default browser: {} ({})", sys.display_name, sys.identifier);
 /// ```
-pub fn system_default_browser() -> Option<SystemDefaultBrowser> {
+pub fn system_default_browser_with_fs<F: FileSystem>(fs: &F) -> Option<SystemDefaultBrowser> {
     if let Some(entry) = query_default_desktop_entry() {
         if let Some(candidate) = linux_candidates()
             .iter()
             .find(|candidate| candidate.desktop_entries.contains(&entry.as_str()))
         {
-            if let Some(info) = resolve_candidate(candidate, &RealFileSystem) {
+            if let Some(info) = resolve_candidate(candidate, fs) {
                 return Some(SystemDefaultBrowser {
                     identifier: entry.clone(),
                     display_name: candidate.display_name.to_string(),
@@ -90,6 +90,10 @@ pub fn system_default_browser() -> Option<SystemDefaultBrowser> {
     }
 
     None
+}
+
+pub fn system_default_browser() -> Option<SystemDefaultBrowser> {
+    system_default_browser_with_fs(&RealFileSystem)
 }
 
 /// Launches the given URLs using the specified launch target.

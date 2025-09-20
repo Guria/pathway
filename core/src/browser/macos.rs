@@ -4,9 +4,9 @@ use super::{
 };
 use crate::filesystem::FileSystem;
 use std::env;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::{fs, io};
 use thiserror::Error;
 use tracing::debug;
 
@@ -28,7 +28,7 @@ pub fn detect_browsers<F: FileSystem>(_fs: &F) -> Vec<BrowserInfo> {
     let candidates = mac_candidates();
 
     for candidate in candidates {
-        if let Some(info) = resolve_candidate(candidate) {
+        if let Some(info) = resolve_candidate(candidate, _fs) {
             result.push(info);
         }
     }
@@ -55,7 +55,7 @@ pub fn detect_browsers<F: FileSystem>(_fs: &F) -> Vec<BrowserInfo> {
 /// //     println!("Default browser bundle id: {}", sys.identifier);
 /// // }
 /// ```
-pub fn system_default_browser() -> Option<SystemDefaultBrowser> {
+pub fn system_default_browser_with_fs<F: FileSystem>(fs: &F) -> Option<SystemDefaultBrowser> {
     if let Some(bundle_id) = default_handler_for_scheme("https") {
         if let Some(candidate) = mac_candidates()
             .iter()
@@ -63,7 +63,7 @@ pub fn system_default_browser() -> Option<SystemDefaultBrowser> {
         {
             let mut path = None;
             for base in mac_base_paths() {
-                if let Some(bundle_path) = locate_bundle_in_base(base, candidate) {
+                if let Some(bundle_path) = locate_bundle_in_base(base, candidate, fs) {
                     path = Some(bundle_path);
                     break;
                 }
@@ -88,6 +88,10 @@ pub fn system_default_browser() -> Option<SystemDefaultBrowser> {
     }
 
     None
+}
+
+pub fn system_default_browser() -> Option<SystemDefaultBrowser> {
+    system_default_browser_with_fs(&crate::filesystem::RealFileSystem)
 }
 
 /// Launch the specified browser (or the system default) with the given URLs.
@@ -528,19 +532,22 @@ fn mac_candidates() -> &'static [MacBrowserCandidate] {
     CANDIDATES
 }
 
-fn resolve_candidate(candidate: &MacBrowserCandidate) -> Option<BrowserInfo> {
+fn resolve_candidate<F: FileSystem>(
+    candidate: &MacBrowserCandidate,
+    fs: &F,
+) -> Option<BrowserInfo> {
     for base in mac_base_paths() {
-        if let Some(bundle_path) = locate_bundle_in_base(base, candidate) {
+        if let Some(bundle_path) = locate_bundle_in_base(base, candidate, fs) {
             let exec_path = bundle_path
                 .join("Contents")
                 .join("MacOS")
                 .join(candidate.executable_name);
 
-            if !exec_path.exists() {
+            if !fs.exists(&exec_path) {
                 continue;
             }
 
-            if !is_executable(&exec_path) {
+            if !is_executable(&exec_path, fs) {
                 continue;
             }
 
@@ -575,10 +582,14 @@ fn mac_base_paths() -> Vec<PathBuf> {
     bases
 }
 
-fn locate_bundle_in_base(base: PathBuf, candidate: &MacBrowserCandidate) -> Option<PathBuf> {
+fn locate_bundle_in_base<F: FileSystem>(
+    base: PathBuf,
+    candidate: &MacBrowserCandidate,
+    fs: &F,
+) -> Option<PathBuf> {
     for bundle in candidate.bundle_names {
         let path = base.join(bundle);
-        if path.exists() {
+        if fs.exists(&path) {
             return Some(path);
         }
     }
@@ -586,9 +597,9 @@ fn locate_bundle_in_base(base: PathBuf, candidate: &MacBrowserCandidate) -> Opti
 }
 
 #[cfg(target_family = "unix")]
-fn is_executable(path: &Path) -> bool {
+fn is_executable<F: FileSystem>(path: &Path, fs: &F) -> bool {
     use std::os::unix::fs::PermissionsExt;
-    if let Ok(metadata) = fs::metadata(path) {
+    if let Ok(metadata) = fs.metadata(path) {
         let permissions = metadata.permissions();
         permissions.mode() & 0o111 != 0
     } else {
@@ -597,8 +608,8 @@ fn is_executable(path: &Path) -> bool {
 }
 
 #[cfg(not(target_family = "unix"))]
-fn is_executable(path: &Path) -> bool {
-    path.exists()
+fn is_executable<F: FileSystem>(path: &Path, fs: &F) -> bool {
+    fs.exists(path)
 }
 
 fn default_handler_for_scheme(scheme: &str) -> Option<String> {

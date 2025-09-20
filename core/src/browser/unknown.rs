@@ -36,8 +36,12 @@ pub fn detect_browsers<F: FileSystem>(_fs: &F) -> Vec<BrowserInfo> {
 /// let sys = system_default_browser();
 /// assert!(sys.is_none());
 /// ```
-pub fn system_default_browser() -> Option<SystemDefaultBrowser> {
+pub fn system_default_browser_with_fs<F: FileSystem>(_fs: &F) -> Option<SystemDefaultBrowser> {
     None
+}
+
+pub fn system_default_browser() -> Option<SystemDefaultBrowser> {
+    system_default_browser_with_fs(&crate::filesystem::RealFileSystem)
 }
 
 /// Launch a browser for the given target and URLs.
@@ -75,8 +79,8 @@ pub fn launch(target: LaunchTarget<'_>, urls: &[String]) -> Result<LaunchOutcome
 ///
 /// # Examples
 ///
-/// ```
-/// use crate::core::browser::{launch_with_profile, LaunchTarget};
+/// ```no_run
+/// use pathway::{launch_with_profile, LaunchTarget};
 ///
 /// let urls = vec!["https://example.com".to_string()];
 /// // SystemDefault is unsupported on this platform; this example demonstrates calling the function.

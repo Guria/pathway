@@ -179,8 +179,8 @@ pub struct BrowserInventory {
     pub system_default: SystemDefaultBrowser,
 }
 
-pub fn detect_inventory() -> BrowserInventory {
-    let mut browsers = platform::detect_browsers(&crate::filesystem::RealFileSystem);
+pub fn detect_inventory_with_fs<F: crate::filesystem::FileSystem>(fs: &F) -> BrowserInventory {
+    let mut browsers = platform::detect_browsers(fs);
     deduplicate(&mut browsers);
     browsers.sort_by(|a, b| {
         (
@@ -194,12 +194,15 @@ pub fn detect_inventory() -> BrowserInventory {
                 &b.display_name,
             ))
     });
-
     BrowserInventory {
         browsers,
-        system_default: platform::system_default_browser()
+        system_default: platform::system_default_browser_with_fs(fs)
             .unwrap_or_else(SystemDefaultBrowser::fallback),
     }
+}
+
+pub fn detect_inventory() -> BrowserInventory {
+    detect_inventory_with_fs(&crate::filesystem::RealFileSystem)
 }
 
 fn deduplicate(browsers: &mut Vec<BrowserInfo>) {
