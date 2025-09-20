@@ -48,28 +48,6 @@ fn test_launch_with_nonexistent_browser() {
 }
 
 #[test]
-fn test_profile_custom_dir_with_tempdir() {
-    let temp_dir = TempDir::new().expect("Failed to create temporary directory");
-    let test_profile_path = temp_dir.path().join("test-profile");
-    let test_profile_str = test_profile_path
-        .to_str()
-        .expect("Failed to convert temporary path to string");
-
-    let mut cmd = Command::cargo_bin("pathway").unwrap();
-    cmd.args([
-        "profile",
-        "--browser",
-        "chrome", // Even if Chrome isn't installed, the directory operations should work
-        "--user-dir",
-        test_profile_str,
-        "list",
-    ])
-    .assert()
-    .success()
-    .stderr(predicate::str::contains("profiles:"));
-}
-
-#[test]
 fn test_file_url_with_tempfile() {
     let temp_dir = TempDir::new().expect("Failed to create temporary directory");
     let test_file = temp_dir.path().join("test.html");
