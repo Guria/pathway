@@ -1,20 +1,40 @@
 # Pathway macOS Bundle
 
-This directory contains the resources required to build the `Pathway.app` bundle.
+This directory contains the resources required to build the `Pathway.app` bundle and installer package.
 
 ## Contents
 
-- `build_app.sh` &ndash; orchestrates compiling the universal Rust binary and Swift shim, assembles the bundle, signs it, and produces a distributable archive.
-- `Info.plist` &ndash; template used to generate the bundle metadata.
-- `PathwayShim.swift` &ndash; background-only Cocoa application that forwards URL events to the bundled `pathway` binary.
-- `PathwayShim.entitlements` &ndash; entitlements used for ad-hoc code signing.
+- `build_app.sh` – builds the app bundle and creates distributable archives (.zip, .pkg)
+- `Info.plist` – app bundle metadata template
+- `PathwayShim.swift` – Swift app that forwards URL events to the Rust CLI binary
+- `PathwayShim.entitlements` – code signing entitlements
 
-## Building locally
+## Building
 
-Run the build script on a macOS host with the Xcode command line tools installed:
+Run the build script on macOS with Xcode command line tools:
 
 ```bash
 ./packaging/macos/build_app.sh
 ```
 
-The resulting bundle is written to `packaging/macos/build/Pathway.app` and a ready-to-ship archive is created in `packaging/macos/dist/`.
+Output files in `packaging/macos/dist/`:
+- `Pathway-{version}.zip` – App bundle archive (manual installation)
+- `Pathway-{version}.pkg` – macOS installer package (recommended)
+
+## Installation
+
+### PKG Installer (Recommended)
+1. Double-click the `.pkg` file
+2. Follow the installer prompts (admin privileges required)
+
+### ZIP Archive (Manual)
+1. Extract the ZIP file
+2. Drag `Pathway.app` to the Applications folder
+
+## Setting as Default Browser
+
+After installation:
+1. Open **System Preferences** → **General** → **Default web browser**
+2. Select **Pathway Browser Router**
+
+The app includes infinite loop protection when set as the default browser.

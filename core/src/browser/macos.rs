@@ -617,14 +617,28 @@ fn default_handler_for_scheme(scheme: &str) -> Option<String> {
 fn parse_defaults_for_scheme(data: &str, scheme: &str) -> Option<String> {
     let mut current_scheme: Option<String> = None;
     let mut current_handler: Option<String> = None;
+    let mut in_preferred_versions = false;
 
     for line in data.lines() {
         let trimmed = line.trim();
 
+        // Track when we're inside LSHandlerPreferredVersions block
+        if trimmed.starts_with("LSHandlerPreferredVersions") {
+            in_preferred_versions = true;
+            continue;
+        }
+
+        // End of preferred versions block
+        if in_preferred_versions && (trimmed == "};" || trimmed == "}") {
+            in_preferred_versions = false;
+            continue;
+        }
+
         if trimmed.starts_with("LSHandlerURLScheme") {
             current_scheme = parse_defaults_value(trimmed);
-        } else if trimmed.starts_with("LSHandlerRoleAll")
-            || trimmed.starts_with("LSHandlerRoleViewer")
+        } else if !in_preferred_versions
+            && (trimmed.starts_with("LSHandlerRoleAll")
+                || trimmed.starts_with("LSHandlerRoleViewer"))
         {
             current_handler = parse_defaults_value(trimmed);
         }
@@ -637,6 +651,7 @@ fn parse_defaults_for_scheme(data: &str, scheme: &str) -> Option<String> {
             }
             current_scheme = None;
             current_handler = None;
+            in_preferred_versions = false;
         }
     }
 

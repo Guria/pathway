@@ -44,6 +44,10 @@ enum Commands {
         #[arg(long)]
         system_default: bool,
 
+        /// Force fallback browser (prevents infinite loops when launched from app bundle)
+        #[arg(long)]
+        no_system_default: bool,
+
         /// Profile options (mutually exclusive)
         #[command(flatten)]
         profile: ProfileArgs,
@@ -259,10 +263,35 @@ struct LaunchCommandParams {
     browser: Option<String>,
     channel: Option<BrowserChannelArg>,
     system_default: bool,
+    no_system_default: bool,
     profile_args: ProfileArgs,
     window_args: WindowArgs,
     no_launch: bool,
     format: OutputFormat,
+}
+
+/// Get a safe fallback browser when infinite loop prevention is needed.
+/// Uses OS-appropriate browser preferences for reliability.
+fn get_fallback_browser(inventory: &BrowserInventory) -> Option<&BrowserInfo> {
+    // OS-specific fallback preferences
+    let fallback_preferences = if cfg!(target_os = "macos") {
+        &["safari", "chrome", "firefox"][..]
+    } else if cfg!(target_os = "windows") {
+        &["chrome", "firefox", "edge"][..]
+    } else {
+        // Linux and other platforms
+        &["chrome", "firefox", "chromium"][..]
+    };
+
+    // Try each preferred browser in order
+    for browser_name in fallback_preferences {
+        if let Some(browser) = find_browser(&inventory.browsers, browser_name, None) {
+            return Some(browser);
+        }
+    }
+
+    // Fallback to first available browser if preferred ones not found
+    inventory.browsers.first()
 }
 
 /// Entry point for the CLI executable.
@@ -303,6 +332,7 @@ fn main() {
             browser,
             channel,
             system_default,
+            no_system_default,
             profile,
             window,
             no_launch,
@@ -312,6 +342,7 @@ fn main() {
                 browser,
                 channel,
                 system_default,
+                no_system_default,
                 profile_args: profile,
                 window_args: window,
                 no_launch,
@@ -559,6 +590,7 @@ fn handle_launch_command(inventory: &BrowserInventory, params: LaunchCommandPara
         browser,
         channel,
         system_default,
+        no_system_default,
         profile_args,
         window_args,
         no_launch,
@@ -574,12 +606,42 @@ fn handle_launch_command(inventory: &BrowserInventory, params: LaunchCommandPara
     }
 
     let requested_channel = channel.map(Into::into);
-    let selected_browser = select_browser(
+    let mut selected_browser = select_browser(
         inventory,
         browser.as_deref(),
         requested_channel,
-        system_default,
+        system_default && !no_system_default,
     );
+
+    // Force fallback browser when --no-system-default is used
+    let mut is_fallback = false;
+    if no_system_default && selected_browser.is_none() {
+        selected_browser = get_fallback_browser(inventory);
+        is_fallback = true;
+
+        if selected_browser.is_none() {
+            let error_msg = "No fallback browser available";
+            if format == OutputFormat::Human {
+                error!("{}", error_msg);
+            } else {
+                let response = LaunchJsonResponse {
+                    action: "launch",
+                    status: "error",
+                    urls: normalized_urls.clone(),
+                    url: normalized_urls.first().cloned(),
+                    validated: results.clone(),
+                    warnings: None,
+                    browser: None,
+                    profile: None,
+                    window_options: None,
+                    command: None,
+                    message: Some(error_msg.to_string()),
+                };
+                println!("{}", serde_json::to_string_pretty(&response).unwrap());
+            }
+            process::exit(1);
+        }
+    }
 
     let additional_warnings = generate_browser_warnings(
         &browser,
@@ -587,6 +649,7 @@ fn handle_launch_command(inventory: &BrowserInventory, params: LaunchCommandPara
         requested_channel,
         inventory,
         format,
+        is_fallback,
     );
 
     let (profile_options, window_options, mut warnings) =
@@ -594,9 +657,14 @@ fn handle_launch_command(inventory: &BrowserInventory, params: LaunchCommandPara
 
     warnings.extend(additional_warnings);
 
-    let launch_target = selected_browser
-        .map(LaunchTarget::Browser)
-        .unwrap_or(LaunchTarget::SystemDefault);
+    let launch_target = if is_fallback {
+        // Use the fallback browser directly instead of system default
+        LaunchTarget::Browser(selected_browser.unwrap())
+    } else {
+        selected_browser
+            .map(LaunchTarget::Browser)
+            .unwrap_or(LaunchTarget::SystemDefault)
+    };
 
     if no_launch {
         let response_data = LaunchResponseData {
@@ -1321,8 +1389,27 @@ fn generate_browser_warnings(
     requested_channel: Option<BrowserChannel>,
     inventory: &BrowserInventory,
     format: OutputFormat,
+    is_fallback: bool,
 ) -> Vec<String> {
     let mut warnings = Vec::new();
+
+    if is_fallback {
+        debug_assert!(
+            selected_browser.is_some(),
+            "fallback should always resolve a browser"
+        );
+        let fallback_name = selected_browser
+            .map(|b| b.display_name.as_str())
+            .unwrap_or("<unreachable>");
+        let warning = format!(
+            "Using {} instead of system default (--no-system-default was specified)",
+            fallback_name
+        );
+        if format == OutputFormat::Human {
+            warn!("{}", warning);
+        }
+        warnings.push(warning);
+    }
 
     if browser.is_some() && selected_browser.is_none() {
         let mut warning = format!("Browser '{}' not found", browser.as_deref().unwrap());

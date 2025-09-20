@@ -1,10 +1,10 @@
 import Cocoa
-import os
+import os.log
 
 @main
 final class PathwayShim: NSObject, NSApplicationDelegate {
     private static let subsystem = "dev.pathway.router"
-    private let logger = OSLog(subsystem: PathwayShim.subsystem, category: "shim")
+    private let logger = Logger(subsystem: PathwayShim.subsystem, category: "shim")
     private let eventManager = NSAppleEventManager.shared()
     private let syncQueue = DispatchQueue(label: "dev.pathway.router.shim.queue")
     private var pendingLaunches = 0
@@ -52,15 +52,16 @@ final class PathwayShim: NSObject, NSApplicationDelegate {
         syncQueue.async { [weak self] in
             guard let self = self else { return }
             guard !urls.isEmpty else {
-                os_log("Received empty URL payload", log: self.logger, type: .debug)
+                self.logger.debug("Received empty URL payload")
                 self.scheduleTerminationCheckLocked()
                 return
             }
 
             let candidateURL = Bundle.main.url(forAuxiliaryExecutable: "pathway")
-                ?? Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/pathway")
+                ?? Bundle.main.url(forResource: "pathway", withExtension: nil)
+                ?? Bundle.main.bundleURL.appendingPathComponent("Contents/Resources/pathway")
             guard FileManager.default.isExecutableFile(atPath: candidateURL.path) else {
-                os_log("Unable to locate bundled pathway binary at %{public}@", log: self.logger, type: .fault, candidateURL.path)
+                self.logger.fault("Unable to locate bundled pathway binary at \(candidateURL.path, privacy: .public)")
                 self.scheduleTerminationCheckLocked()
                 return
             }
@@ -69,15 +70,11 @@ final class PathwayShim: NSObject, NSApplicationDelegate {
             self.pendingLaunches += 1
             let process = Process()
             process.executableURL = pathwayURL
-            // Pathway CLI requires the `launch` subcommand and `--system-default` flag.
-            process.arguments = ["launch", "--system-default"] + urls.map { $0.absoluteString }
+            // Pathway CLI requires the `launch` subcommand and `--no-system-default` flag to prevent infinite loops.
+            process.arguments = ["launch", "--no-system-default"] + urls.map { $0.absoluteString }
             self.activeProcesses.append(process)
 
             var environment = ProcessInfo.processInfo.environment
-            environment["PATHWAY_LAUNCHED_FROM_BUNDLE"] = "1"
-            if let identifier = Bundle.main.bundleIdentifier {
-                environment["PATHWAY_BUNDLE_IDENTIFIER"] = identifier
-            }
             process.environment = environment
 
             process.standardInput = FileHandle.nullDevice
@@ -95,9 +92,9 @@ final class PathwayShim: NSObject, NSApplicationDelegate {
 
             do {
                 try process.run()
-                os_log("Forwarded %d URL(s) to pathway binary", log: self.logger, type: .info, urls.count)
+                self.logger.info("Forwarded \(urls.count) URL(s) to pathway binary")
             } catch {
-                os_log("Failed to launch pathway binary: %{public}@", log: self.logger, type: .error, error.localizedDescription)
+                self.logger.error("Failed to launch pathway binary: \(error.localizedDescription, privacy: .public)")
                 self.activeProcesses.removeAll { $0 === process }
                 self.pendingLaunches = max(0, self.pendingLaunches - 1)
                 self.scheduleTerminationCheckLocked()
@@ -117,7 +114,7 @@ final class PathwayShim: NSObject, NSApplicationDelegate {
             guard let self = self else { return }
             self.syncQueue.async {
                 if self.pendingLaunches == 0 {
-                    os_log("No pending launches, terminating shim", log: self.logger, type: .debug)
+                    self.logger.debug("No pending launches, terminating shim")
                     DispatchQueue.main.async {
                         NSApp.terminate(nil)
                     }

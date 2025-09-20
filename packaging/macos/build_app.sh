@@ -24,6 +24,8 @@ require_cmd plutil
 require_cmd python3
 require_cmd sips
 require_cmd iconutil
+require_cmd pkgbuild
+require_cmd productbuild
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CORE_DIR="$ROOT_DIR/core"
@@ -81,7 +83,7 @@ cleanup() { rm -f "$SWIFT_ARM" "$SWIFT_X86"; rm -rf "$ICONSET_DIR"; }
 trap cleanup EXIT
 
 swiftc -parse-as-library -O -sdk "$SDK_PATH" -target arm64-apple-macos11 "$SWIFT_SRC" -o "$SWIFT_ARM"
-swiftc -parse-as-library -O -sdk "$SDK_PATH" -target x86_64-apple-macos10.15 "$SWIFT_SRC" -o "$SWIFT_X86"
+swiftc -parse-as-library -O -sdk "$SDK_PATH" -target x86_64-apple-macos11 "$SWIFT_SRC" -o "$SWIFT_X86"
 
 lipo -create "$SWIFT_ARM" "$SWIFT_X86" -output "$APP_BUNDLE/Contents/MacOS/PathwayShim"
 chmod +x "$APP_BUNDLE/Contents/MacOS/PathwayShim"
@@ -119,5 +121,53 @@ OUTPUT_ZIP="$DIST_DIR/Pathway-${VERSION}.zip"
 rm -f "$OUTPUT_ZIP"
 ditto -c -k --keepParent "$APP_BUNDLE" "$OUTPUT_ZIP"
 
+# Create .pkg installer
+PKG_PAYLOAD_DIR="$BUILD_DIR/pkg_payload"
+PKG_COMPONENT="$BUILD_DIR/Pathway-component.pkg"
+OUTPUT_PKG="$DIST_DIR/Pathway-${VERSION}.pkg"
+
+# Create payload directory structure
+rm -rf "$PKG_PAYLOAD_DIR"
+mkdir -p "$PKG_PAYLOAD_DIR/Applications"
+ditto "$APP_BUNDLE" "$PKG_PAYLOAD_DIR/Applications/$(basename "$APP_BUNDLE")"
+
+# Build component package
+pkgbuild \
+  --root "$PKG_PAYLOAD_DIR" \
+  --identifier "dev.pathway.router" \
+  --version "$VERSION" \
+  --install-location "/" \
+  "$PKG_COMPONENT"
+
+# Build final installer package
+if [[ "$IDENTITY" == "-" ]]; then
+  # Ad-hoc signing - create unsigned package
+  echo "Building unsigned package (ad-hoc signing)"
+  productbuild \
+    --package "$PKG_COMPONENT" \
+    "$OUTPUT_PKG"
+else
+  # Proper signing identity available
+  echo "Building signed package with identity: $IDENTITY"
+  if [[ -n "${CI:-}" ]]; then
+    # In CI, use the keychain we set up
+    productbuild \
+      --package "$PKG_COMPONENT" \
+      --sign "$IDENTITY" \
+      --keychain build.keychain \
+      "$OUTPUT_PKG"
+  else
+    # Local development
+    productbuild \
+      --package "$PKG_COMPONENT" \
+      --sign "$IDENTITY" \
+      "$OUTPUT_PKG"
+  fi
+fi
+
+# Clean up intermediate files
+rm -rf "$PKG_PAYLOAD_DIR" "$PKG_COMPONENT"
+
 echo "Created bundle at $APP_BUNDLE"
 echo "Created archive at $OUTPUT_ZIP"
+echo "Created installer at $OUTPUT_PKG"
