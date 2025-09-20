@@ -14,6 +14,12 @@ Pathway is a lightweight Rust CLI tool for URL validation and routing with brows
 - **No backward compatibility**: Since there are no official releases, document only the current API
 - **Document only hard-to-infer details**: Focus on complex logic, design decisions, or non-obvious behavior patterns
 
+## Implementation Standards
+- **No useless comments**: Only include comments that clarify non-obvious behavior
+- **Current state focus**: Avoid referring to previous implementations in code comments
+- **No backward compatibility code**: Since there are no official releases, implement only the current API
+- **Clean abstractions**: Focus on clear, direct interfaces without wrapper layers
+
 ## Working Effectively
 
 ### Bootstrap, Build, and Test

@@ -2,9 +2,6 @@ use assert_cmd::Command;
 use predicates::prelude::*;
 use tempfile::TempDir;
 
-/// Basic integration tests using the VFS approach.
-/// These tests focus on core functionality without depending on host browser state.
-
 #[test]
 fn test_launch_https_url() {
     let mut cmd = Command::cargo_bin("pathway").unwrap();
