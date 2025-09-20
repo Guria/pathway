@@ -217,10 +217,10 @@ fn windows_candidates() -> &'static [WindowsBrowserCandidate] {
             cli_name: "chrome",
             display_name: "Google Chrome",
             relative_paths: &[
-                "Google/Chrome/Application/chrome.exe", // Traditional Windows installation
-                "googlechrome/current/chrome.exe",      // Scoop installation
-                "googlechrome/tools/chrome.exe",        // Chocolatey installation
-                "chrome.exe",                           // Chocolatey shim
+                "Google/Chrome/Application/chrome.exe",
+                "googlechrome/current/chrome.exe",
+                "googlechrome/tools/chrome.exe",
+                "chrome.exe",
             ],
             aliases: &["google-chrome"],
         },
@@ -230,9 +230,9 @@ fn windows_candidates() -> &'static [WindowsBrowserCandidate] {
             cli_name: "chrome-beta",
             display_name: "Google Chrome Beta",
             relative_paths: &[
-                "Google/Chrome Beta/Application/chrome.exe", // Traditional Windows installation
-                "googlechrome-beta/current/chrome.exe",      // Scoop installation (if available)
-                "googlechrome-beta/tools/chrome.exe", // Chocolatey installation (if available)
+                "Google/Chrome Beta/Application/chrome.exe",
+                "googlechrome-beta/current/chrome.exe",
+                "googlechrome-beta/tools/chrome.exe",
             ],
             aliases: &["google-chrome-beta"],
         },
@@ -242,9 +242,9 @@ fn windows_candidates() -> &'static [WindowsBrowserCandidate] {
             cli_name: "chrome-dev",
             display_name: "Google Chrome Dev",
             relative_paths: &[
-                "Google/Chrome Dev/Application/chrome.exe", // Traditional Windows installation
-                "googlechrome-dev/current/chrome.exe",      // Scoop installation (if available)
-                "googlechrome-dev/tools/chrome.exe", // Chocolatey installation (if available)
+                "Google/Chrome Dev/Application/chrome.exe",
+                "googlechrome-dev/current/chrome.exe",
+                "googlechrome-dev/tools/chrome.exe",
             ],
             aliases: &["google-chrome-dev"],
         },
@@ -262,10 +262,10 @@ fn windows_candidates() -> &'static [WindowsBrowserCandidate] {
             cli_name: "firefox",
             display_name: "Mozilla Firefox",
             relative_paths: &[
-                "Mozilla Firefox/firefox.exe", // Traditional Windows installation
-                "firefox/current/firefox.exe", // Scoop installation
-                "firefox/tools/firefox.exe",   // Chocolatey installation
-                "firefox.exe",                 // Chocolatey shim
+                "Mozilla Firefox/firefox.exe",
+                "firefox/current/firefox.exe",
+                "firefox/tools/firefox.exe",
+                "firefox.exe",
             ],
             aliases: &["mozilla-firefox"],
         },
@@ -275,9 +275,9 @@ fn windows_candidates() -> &'static [WindowsBrowserCandidate] {
             cli_name: "firefox-developer",
             display_name: "Firefox Developer Edition",
             relative_paths: &[
-                "Firefox Developer Edition/firefox.exe", // Traditional Windows installation
-                "firefox-developer/current/firefox.exe", // Scoop installation (if available)
-                "firefox-developer/tools/firefox.exe",   // Chocolatey installation (if available)
+                "Firefox Developer Edition/firefox.exe",
+                "firefox-developer/current/firefox.exe",
+                "firefox-developer/tools/firefox.exe",
             ],
             aliases: &["firefox-dev"],
         },
@@ -295,10 +295,10 @@ fn windows_candidates() -> &'static [WindowsBrowserCandidate] {
             cli_name: "edge",
             display_name: "Microsoft Edge",
             relative_paths: &[
-                "Microsoft/Edge/Application/msedge.exe", // Traditional Windows installation
-                "msedge/current/msedge.exe",             // Scoop installation (if available)
-                "msedge/tools/msedge.exe",               // Chocolatey installation (if available)
-                "msedge.exe",                            // Chocolatey shim
+                "Microsoft/Edge/Application/msedge.exe",
+                "msedge/current/msedge.exe",
+                "msedge/tools/msedge.exe",
+                "msedge.exe",
             ],
             aliases: &["microsoft-edge"],
         },
@@ -332,10 +332,10 @@ fn windows_candidates() -> &'static [WindowsBrowserCandidate] {
             cli_name: "brave",
             display_name: "Brave Browser",
             relative_paths: &[
-                "BraveSoftware/Brave-Browser/Application/brave.exe", // Traditional Windows installation
-                "brave/current/brave.exe",                           // Scoop installation
-                "brave/tools/brave.exe",                             // Chocolatey installation
-                "brave.exe",                                         // Chocolatey shim
+                "BraveSoftware/Brave-Browser/Application/brave.exe",
+                "brave/current/brave.exe",
+                "brave/tools/brave.exe",
+                "brave.exe",
             ],
             aliases: &["brave-browser"],
         },
@@ -369,9 +369,9 @@ fn windows_candidates() -> &'static [WindowsBrowserCandidate] {
             cli_name: "vivaldi",
             display_name: "Vivaldi",
             relative_paths: &[
-                "Vivaldi/Application/vivaldi.exe", // Traditional Windows installation
-                "vivaldi/current/vivaldi.exe",     // Scoop installation
-                "vivaldi/tools/vivaldi.exe",       // Chocolatey installation
+                "Vivaldi/Application/vivaldi.exe",
+                "vivaldi/current/vivaldi.exe",
+                "vivaldi/tools/vivaldi.exe",
             ],
             aliases: &["vivaldi-browser"],
         },
@@ -381,9 +381,9 @@ fn windows_candidates() -> &'static [WindowsBrowserCandidate] {
             cli_name: "opera",
             display_name: "Opera",
             relative_paths: &[
-                "Opera/opera.exe",         // Traditional Windows installation
-                "opera/current/opera.exe", // Scoop installation
-                "opera/tools/opera.exe",   // Chocolatey installation
+                "Opera/opera.exe",
+                "opera/current/opera.exe",
+                "opera/tools/opera.exe",
             ],
             aliases: &["opera-browser"],
         },
@@ -401,9 +401,9 @@ fn windows_candidates() -> &'static [WindowsBrowserCandidate] {
             cli_name: "chromium",
             display_name: "Chromium",
             relative_paths: &[
-                "Chromium/Application/chromium.exe", // Traditional Windows installation
-                "chromium/current/chrome.exe", // Scoop installation (note: chrome.exe not chromium.exe)
-                "chromium/tools/chromium.exe", // Chocolatey installation
+                "Chromium/Application/chromium.exe",
+                "chromium/current/chrome.exe", // Note: chrome.exe not chromium.exe
+                "chromium/tools/chromium.exe",
             ],
             aliases: &["chromium-browser"],
         },
@@ -657,7 +657,7 @@ mod tests {
     #[test]
     fn test_determine_installation_source() {
         use std::path::Path;
-        
+
         // Test Scoop installation source detection
         assert_eq!(
             determine_installation_source(Path::new("C:\\Users\\user\\scoop\\apps")),
@@ -701,7 +701,7 @@ mod tests {
             determine_installation_source(Path::new("C:\\CustomPath")),
             "windows"
         );
-        
+
         // Test edge cases that should not be misclassified
         assert_eq!(
             determine_installation_source(Path::new("C:\\work\\scoopkit")),
