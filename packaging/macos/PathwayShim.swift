@@ -4,7 +4,7 @@ import os
 @main
 final class PathwayShim: NSObject, NSApplicationDelegate {
     private static let subsystem = "dev.pathway.router"
-    private let logger = Logger(subsystem: PathwayShim.subsystem, category: "shim")
+    private let logger = OSLog(subsystem: PathwayShim.subsystem, category: "shim")
     private let eventManager = NSAppleEventManager.shared()
     private let syncQueue = DispatchQueue(label: "dev.pathway.router.shim.queue")
     private var pendingLaunches = 0
@@ -52,7 +52,7 @@ final class PathwayShim: NSObject, NSApplicationDelegate {
         syncQueue.async { [weak self] in
             guard let self = self else { return }
             guard !urls.isEmpty else {
-                self.logger.debug("Received empty URL payload")
+                os_log("Received empty URL payload", log: self.logger, type: .debug)
                 self.scheduleTerminationCheckLocked()
                 return
             }
@@ -60,7 +60,7 @@ final class PathwayShim: NSObject, NSApplicationDelegate {
             let candidateURL = Bundle.main.url(forAuxiliaryExecutable: "pathway")
                 ?? Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/pathway")
             guard FileManager.default.isExecutableFile(atPath: candidateURL.path) else {
-                self.logger.fault("Unable to locate bundled pathway binary at \(candidateURL.path, privacy: .public)")
+                os_log("Unable to locate bundled pathway binary at %{public}@", log: self.logger, type: .fault, candidateURL.path)
                 self.scheduleTerminationCheckLocked()
                 return
             }
@@ -95,9 +95,9 @@ final class PathwayShim: NSObject, NSApplicationDelegate {
 
             do {
                 try process.run()
-                self.logger.info("Forwarded \(urls.count) URL(s) to pathway binary")
+                os_log("Forwarded %d URL(s) to pathway binary", log: self.logger, type: .info, urls.count)
             } catch {
-                self.logger.error("Failed to launch pathway binary: \(error.localizedDescription)")
+                os_log("Failed to launch pathway binary: %{public}@", log: self.logger, type: .error, error.localizedDescription)
                 self.activeProcesses.removeAll { $0 === process }
                 self.pendingLaunches = max(0, self.pendingLaunches - 1)
                 self.scheduleTerminationCheckLocked()
@@ -117,7 +117,7 @@ final class PathwayShim: NSObject, NSApplicationDelegate {
             guard let self = self else { return }
             self.syncQueue.async {
                 if self.pendingLaunches == 0 {
-                    self.logger.debug("No pending launches, terminating shim")
+                    os_log("No pending launches, terminating shim", log: self.logger, type: .debug)
                     DispatchQueue.main.async {
                         NSApp.terminate(nil)
                     }
