@@ -1,4 +1,5 @@
 use crate::browser::{BrowserInfo, BrowserKind};
+use crate::filesystem::{FileSystem, RealFileSystem};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::fs;
@@ -293,10 +294,18 @@ impl ProfileManager {
     /// // assert!(result.is_ok());
     /// ```
     pub fn prepare_custom_directory(path: &Path) -> Result<PathBuf, ProfileError> {
+        Self::prepare_custom_directory_with_fs(path, &RealFileSystem)
+    }
+
+    /// Ensure a path exists and is writable using the provided file system.
+    pub fn prepare_custom_directory_with_fs<F: FileSystem>(
+        path: &Path,
+        fs: &F,
+    ) -> Result<PathBuf, ProfileError> {
         let path = path.to_path_buf();
 
-        if !path.exists() {
-            fs::create_dir_all(&path).map_err(|e| {
+        if !fs.exists(&path) {
+            fs.create_dir_all(&path).map_err(|e| {
                 ProfileError::PermissionDenied(format!(
                     "Cannot create directory {}: {}",
                     path.display(),
@@ -305,22 +314,17 @@ impl ProfileManager {
             })?;
         }
 
-        if !path.is_dir() {
+        if !fs.is_dir(&path) {
             return Err(ProfileError::InvalidDirectory(format!(
                 "{} is not a directory",
                 path.display()
             )));
         }
-        use std::fs::OpenOptions;
+
         let test_file = path.join(".pathway_test");
-        match OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(&test_file)
-        {
+        match fs.write(&test_file, b"test") {
             Ok(_) => {
-                if let Err(e) = fs::remove_file(&test_file) {
+                if let Err(e) = fs.remove_file(&test_file) {
                     warn!(
                         "Temporary test file '{}' could not be removed: {}",
                         test_file.display(),
