@@ -216,7 +216,11 @@ fn windows_candidates() -> &'static [WindowsBrowserCandidate] {
             channel: BrowserChannel::Stable,
             cli_name: "chrome",
             display_name: "Google Chrome",
-            relative_paths: &["Google/Chrome/Application/chrome.exe"],
+            relative_paths: &[
+                "Google/Chrome/Application/chrome.exe", // Traditional Windows installation
+                "googlechrome/current/chrome.exe",      // Scoop installation
+                "googlechrome/tools/chrome.exe",        // Chocolatey installation
+            ],
             aliases: &["google-chrome"],
         },
         WindowsBrowserCandidate {
@@ -224,7 +228,11 @@ fn windows_candidates() -> &'static [WindowsBrowserCandidate] {
             channel: BrowserChannel::Beta,
             cli_name: "chrome-beta",
             display_name: "Google Chrome Beta",
-            relative_paths: &["Google/Chrome Beta/Application/chrome.exe"],
+            relative_paths: &[
+                "Google/Chrome Beta/Application/chrome.exe", // Traditional Windows installation
+                "googlechrome-beta/current/chrome.exe",      // Scoop installation (if available)
+                "googlechrome-beta/tools/chrome.exe", // Chocolatey installation (if available)
+            ],
             aliases: &["google-chrome-beta"],
         },
         WindowsBrowserCandidate {
@@ -232,7 +240,11 @@ fn windows_candidates() -> &'static [WindowsBrowserCandidate] {
             channel: BrowserChannel::Dev,
             cli_name: "chrome-dev",
             display_name: "Google Chrome Dev",
-            relative_paths: &["Google/Chrome Dev/Application/chrome.exe"],
+            relative_paths: &[
+                "Google/Chrome Dev/Application/chrome.exe", // Traditional Windows installation
+                "googlechrome-dev/current/chrome.exe",      // Scoop installation (if available)
+                "googlechrome-dev/tools/chrome.exe", // Chocolatey installation (if available)
+            ],
             aliases: &["google-chrome-dev"],
         },
         WindowsBrowserCandidate {
@@ -248,7 +260,11 @@ fn windows_candidates() -> &'static [WindowsBrowserCandidate] {
             channel: BrowserChannel::Stable,
             cli_name: "firefox",
             display_name: "Mozilla Firefox",
-            relative_paths: &["Mozilla Firefox/firefox.exe"],
+            relative_paths: &[
+                "Mozilla Firefox/firefox.exe", // Traditional Windows installation
+                "firefox/current/firefox.exe", // Scoop installation
+                "firefox/tools/firefox.exe",   // Chocolatey installation
+            ],
             aliases: &["mozilla-firefox"],
         },
         WindowsBrowserCandidate {
@@ -304,7 +320,11 @@ fn windows_candidates() -> &'static [WindowsBrowserCandidate] {
             channel: BrowserChannel::Stable,
             cli_name: "brave",
             display_name: "Brave Browser",
-            relative_paths: &["BraveSoftware/Brave-Browser/Application/brave.exe"],
+            relative_paths: &[
+                "BraveSoftware/Brave-Browser/Application/brave.exe", // Traditional Windows installation
+                "brave/current/brave.exe",                           // Scoop installation
+                "brave/tools/brave.exe",                             // Chocolatey installation
+            ],
             aliases: &["brave-browser"],
         },
         WindowsBrowserCandidate {
@@ -360,7 +380,11 @@ fn windows_candidates() -> &'static [WindowsBrowserCandidate] {
             channel: BrowserChannel::Stable,
             cli_name: "chromium",
             display_name: "Chromium",
-            relative_paths: &["Chromium/Application/chromium.exe"],
+            relative_paths: &[
+                "Chromium/Application/chromium.exe", // Traditional Windows installation
+                "chromium/current/chrome.exe", // Scoop installation (note: chrome.exe not chromium.exe)
+                "chromium/tools/chromium.exe", // Chocolatey installation
+            ],
             aliases: &["chromium-browser"],
         },
         WindowsBrowserCandidate {
@@ -381,6 +405,9 @@ fn resolve_candidate(candidate: &WindowsBrowserCandidate) -> Option<BrowserInfo>
         for relative in candidate.relative_paths {
             let path = base.join(relative);
             if path.exists() {
+                // Determine installation source based on the base directory
+                let source = determine_installation_source(&base);
+
                 return Some(BrowserInfo {
                     id: candidate.cli_name.to_string(),
                     cli_name: candidate.cli_name.to_string(),
@@ -396,7 +423,7 @@ fn resolve_candidate(candidate: &WindowsBrowserCandidate) -> Option<BrowserInfo>
                     executable: Some(path.clone()),
                     bundle_id: None,
                     version: None,
-                    source: Some("windows".to_string()),
+                    source: Some(source),
                 });
             }
         }
@@ -405,8 +432,22 @@ fn resolve_candidate(candidate: &WindowsBrowserCandidate) -> Option<BrowserInfo>
     None
 }
 
+fn determine_installation_source(base_path: &PathBuf) -> String {
+    let path_str = base_path.to_string_lossy().to_lowercase();
+
+    if path_str.contains("scoop") {
+        "scoop".to_string()
+    } else if path_str.contains("chocolatey") {
+        "chocolatey".to_string()
+    } else {
+        "windows".to_string()
+    }
+}
+
 fn windows_base_dirs() -> Vec<PathBuf> {
     let mut dirs = Vec::new();
+
+    // Traditional Windows installation directories
     if let Some(path) = env::var_os("PROGRAMFILES") {
         dirs.push(PathBuf::from(path));
     }
@@ -416,6 +457,21 @@ fn windows_base_dirs() -> Vec<PathBuf> {
     if let Some(path) = env::var_os("LOCALAPPDATA") {
         dirs.push(PathBuf::from(path));
     }
+
+    // Scoop package manager directories
+    if let Some(scoop_path) = env::var_os("SCOOP") {
+        dirs.push(PathBuf::from(scoop_path).join("apps"));
+    }
+    if let Some(user_profile) = env::var_os("USERPROFILE") {
+        dirs.push(PathBuf::from(user_profile).join("scoop").join("apps"));
+    }
+
+    // Chocolatey package manager directories
+    if let Some(choco_path) = env::var_os("ChocolateyInstall") {
+        dirs.push(PathBuf::from(choco_path).join("lib"));
+    }
+    dirs.push(PathBuf::from("C:\\ProgramData\\chocolatey\\lib"));
+
     dirs
 }
 
@@ -504,7 +560,8 @@ fn quote_windows_arg(arg: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::quote_windows_arg;
+    use super::{determine_installation_source, quote_windows_arg};
+    use std::path::PathBuf;
 
     #[test]
     fn test_quote_windows_arg() {
@@ -553,6 +610,49 @@ mod tests {
         assert_eq!(
             quote_windows_arg("https://example.com/path with spaces"),
             "\"https://example.com/path with spaces\""
+        );
+    }
+
+    #[test]
+    fn test_determine_installation_source() {
+        // Test Scoop installation source detection
+        assert_eq!(
+            determine_installation_source(&PathBuf::from("C:\\Users\\user\\scoop\\apps")),
+            "scoop"
+        );
+        assert_eq!(
+            determine_installation_source(&PathBuf::from("D:\\scoop\\apps")),
+            "scoop"
+        );
+
+        // Test Chocolatey installation source detection
+        assert_eq!(
+            determine_installation_source(&PathBuf::from("C:\\ProgramData\\chocolatey\\lib")),
+            "chocolatey"
+        );
+        assert_eq!(
+            determine_installation_source(&PathBuf::from("C:\\tools\\chocolatey\\lib")),
+            "chocolatey"
+        );
+
+        // Test traditional Windows installation source detection
+        assert_eq!(
+            determine_installation_source(&PathBuf::from("C:\\Program Files")),
+            "windows"
+        );
+        assert_eq!(
+            determine_installation_source(&PathBuf::from("C:\\Program Files (x86)")),
+            "windows"
+        );
+        assert_eq!(
+            determine_installation_source(&PathBuf::from("C:\\Users\\user\\AppData\\Local")),
+            "windows"
+        );
+
+        // Test unknown paths default to "windows"
+        assert_eq!(
+            determine_installation_source(&PathBuf::from("C:\\CustomPath")),
+            "windows"
         );
     }
 }
