@@ -2,6 +2,7 @@ use super::{
     BrowserChannel, BrowserInfo, BrowserKind, LaunchCommand, LaunchOutcome, LaunchTarget,
     SystemDefaultBrowser,
 };
+use crate::filesystem::FileSystem;
 use std::env;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -22,7 +23,7 @@ pub enum LaunchError {
     },
 }
 
-pub fn detect_browsers() -> Vec<BrowserInfo> {
+pub fn detect_browsers<F: FileSystem>(_fs: &F) -> Vec<BrowserInfo> {
     let mut result = Vec::new();
     let candidates = mac_candidates();
 

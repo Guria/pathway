@@ -2,6 +2,7 @@ use super::{
     BrowserChannel, BrowserInfo, BrowserKind, LaunchCommand, LaunchOutcome, LaunchTarget,
     SystemDefaultBrowser,
 };
+use crate::filesystem::FileSystem;
 use std::env;
 use std::io;
 use std::path::PathBuf;
@@ -22,7 +23,7 @@ pub enum LaunchError {
     },
 }
 
-pub fn detect_browsers() -> Vec<BrowserInfo> {
+pub fn detect_browsers<F: FileSystem>(_fs: &F) -> Vec<BrowserInfo> {
     let mut result = Vec::new();
     for candidate in windows_candidates() {
         if let Some(info) = resolve_candidate(candidate) {

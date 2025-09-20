@@ -23,16 +23,12 @@ pub enum LaunchError {
     },
 }
 
-pub fn detect_browsers() -> Vec<BrowserInfo> {
-    detect_browsers_with_fs(&RealFileSystem)
-}
-
-pub fn detect_browsers_with_fs<F: FileSystem>(fs: &F) -> Vec<BrowserInfo> {
+pub fn detect_browsers<F: FileSystem>(fs: &F) -> Vec<BrowserInfo> {
     let mut result = Vec::new();
     let candidates = linux_candidates();
 
     for candidate in candidates {
-        if let Some(info) = resolve_candidate_with_fs(candidate, fs) {
+        if let Some(info) = resolve_candidate(candidate, fs) {
             result.push(info);
         }
     }
@@ -65,7 +61,7 @@ pub fn system_default_browser() -> Option<SystemDefaultBrowser> {
             .iter()
             .find(|candidate| candidate.desktop_entries.contains(&entry.as_str()))
         {
-            if let Some(info) = resolve_candidate(candidate) {
+            if let Some(info) = resolve_candidate(candidate, &RealFileSystem) {
                 return Some(SystemDefaultBrowser {
                     identifier: entry.clone(),
                     display_name: candidate.display_name.to_string(),
@@ -445,20 +441,16 @@ fn linux_candidates() -> &'static [LinuxBrowserCandidate] {
     CANDIDATES
 }
 
-fn resolve_candidate(candidate: &LinuxBrowserCandidate) -> Option<BrowserInfo> {
-    resolve_candidate_with_fs(candidate, &RealFileSystem)
-}
-
-fn resolve_candidate_with_fs<F: FileSystem>(
+fn resolve_candidate<F: FileSystem>(
     candidate: &LinuxBrowserCandidate,
     fs: &F,
 ) -> Option<BrowserInfo> {
-    let search_dirs = linux_search_directories_with_fs(fs);
+    let search_dirs = linux_search_directories(fs);
 
     for binary in candidate.binary_names {
-        let potential = locate_executable_with_fs(binary, &search_dirs, fs);
+        let potential = locate_executable(binary, &search_dirs, fs);
         if let Some(exec_path) = potential {
-            if !is_executable_with_fs(&exec_path, fs) {
+            if !is_executable(&exec_path, fs) {
                 continue;
             }
 
@@ -485,7 +477,7 @@ fn resolve_candidate_with_fs<F: FileSystem>(
     None
 }
 
-fn linux_search_directories_with_fs<F: FileSystem>(fs: &F) -> Vec<PathBuf> {
+fn linux_search_directories<F: FileSystem>(fs: &F) -> Vec<PathBuf> {
     let mut dirs = vec![
         PathBuf::from("/usr/bin"),
         PathBuf::from("/usr/local/bin"),
@@ -498,12 +490,12 @@ fn linux_search_directories_with_fs<F: FileSystem>(fs: &F) -> Vec<PathBuf> {
         dirs.push(Path::new(&home).join("bin"));
     }
 
-    dirs.extend(flatpak_bin_dirs_with_fs(fs));
+    dirs.extend(flatpak_bin_dirs(fs));
 
     dirs
 }
 
-fn flatpak_bin_dirs_with_fs<F: FileSystem>(fs: &F) -> Vec<PathBuf> {
+fn flatpak_bin_dirs<F: FileSystem>(fs: &F) -> Vec<PathBuf> {
     let mut dirs = vec![PathBuf::from("/var/lib/flatpak/exports/bin")];
     if let Ok(home) = env::var("HOME") {
         dirs.push(Path::new(&home).join(".local/share/flatpak/exports/bin"));
@@ -513,11 +505,7 @@ fn flatpak_bin_dirs_with_fs<F: FileSystem>(fs: &F) -> Vec<PathBuf> {
     dirs.into_iter().filter(|path| fs.exists(path)).collect()
 }
 
-fn locate_executable_with_fs<F: FileSystem>(
-    binary: &str,
-    dirs: &[PathBuf],
-    fs: &F,
-) -> Option<PathBuf> {
+fn locate_executable<F: FileSystem>(binary: &str, dirs: &[PathBuf], fs: &F) -> Option<PathBuf> {
     let candidate_path = Path::new(binary);
     if candidate_path.is_absolute() && fs.exists(candidate_path) {
         return Some(candidate_path.to_path_buf());
@@ -534,7 +522,7 @@ fn locate_executable_with_fs<F: FileSystem>(
 }
 
 #[cfg(target_family = "unix")]
-fn is_executable_with_fs<F: FileSystem>(path: &Path, fs: &F) -> bool {
+fn is_executable<F: FileSystem>(path: &Path, fs: &F) -> bool {
     use std::os::unix::fs::PermissionsExt;
     if let Ok(metadata) = fs.metadata(path) {
         let permissions = metadata.permissions();
@@ -545,7 +533,7 @@ fn is_executable_with_fs<F: FileSystem>(path: &Path, fs: &F) -> bool {
 }
 
 #[cfg(not(target_family = "unix"))]
-fn is_executable_with_fs<F: FileSystem>(path: &Path, fs: &F) -> bool {
+fn is_executable<F: FileSystem>(path: &Path, fs: &F) -> bool {
     fs.exists(path)
 }
 
@@ -592,7 +580,7 @@ mod tests {
                     .map_err(|_| std::io::Error::new(std::io::ErrorKind::NotFound, "mock"))
             });
 
-        let browsers = detect_browsers_with_fs(&mock_fs);
+        let browsers = detect_browsers(&mock_fs);
 
         // With our mock, we should detect Chrome
         assert!(browsers.iter().any(|b| b.kind == BrowserKind::Chrome));
@@ -605,7 +593,7 @@ mod tests {
         // Mock that no browser executables exist
         mock_fs.expect_exists().returning(|_| false);
 
-        let browsers = detect_browsers_with_fs(&mock_fs);
+        let browsers = detect_browsers(&mock_fs);
 
         // Should find no browsers
         assert!(browsers.is_empty());
@@ -621,7 +609,7 @@ mod tests {
             .return_const(true);
 
         let dirs = vec![PathBuf::from("/usr/bin")];
-        let result = locate_executable_with_fs("chrome", &dirs, &mock_fs);
+        let result = locate_executable("chrome", &dirs, &mock_fs);
 
         assert_eq!(result, Some(PathBuf::from("/usr/bin/chrome")));
     }

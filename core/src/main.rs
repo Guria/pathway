@@ -1,4 +1,5 @@
 use clap::{Parser, ValueEnum};
+use pathway::filesystem::RealFileSystem;
 use pathway::{
     available_tokens, detect_inventory, find_browser, launch_with_profile, logging,
     validate_profile_options, validate_url, BrowserChannel, BrowserInfo, BrowserInventory,
@@ -401,7 +402,7 @@ fn validate_urls(urls: &[String], format: OutputFormat) -> (Vec<ValidatedUrl>, b
     let mut has_error = false;
 
     for (index, url) in urls.iter().enumerate() {
-        match validate_url(url) {
+        match validate_url(url, &RealFileSystem) {
             Ok(validated) => {
                 if format == OutputFormat::Human {
                     if let Some(warning) = &validated.warning {
@@ -1145,7 +1146,7 @@ fn convert_profile_args(profile_args: &ProfileArgs, warnings: &mut Vec<String>) 
             }
         }
     } else if let Some(user_dir) = &profile_args.user_dir {
-        match ProfileManager::prepare_custom_directory(user_dir) {
+        match ProfileManager::prepare_custom_directory(user_dir, &RealFileSystem) {
             Ok(prepared_path) => ProfileType::CustomDirectory(prepared_path),
             Err(e) => {
                 warnings.push(format!("Failed to prepare custom directory: {}", e));

@@ -1,5 +1,5 @@
 use crate::error::{PathwayError, Result};
-use crate::filesystem::{FileSystem, RealFileSystem};
+use crate::filesystem::FileSystem;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use tracing::{debug, warn};
@@ -37,11 +37,7 @@ pub enum ValidationStatus {
     Invalid,
 }
 
-pub fn validate_url(input: &str) -> Result<ValidatedUrl> {
-    validate_url_with_fs(input, &RealFileSystem)
-}
-
-pub fn validate_url_with_fs<F: FileSystem>(input: &str, fs: &F) -> Result<ValidatedUrl> {
+pub fn validate_url<F: FileSystem>(input: &str, fs: &F) -> Result<ValidatedUrl> {
     debug!("Input: \"{}\"", input);
 
     // Check for path traversal in the original input first
@@ -170,11 +166,11 @@ mod tests {
             .with(mockall::predicate::eq(std::path::Path::new("/etc/hosts")))
             .returning(|path| Ok(path.to_path_buf()));
 
-        assert!(validate_url_with_fs("https://example.com", &mock_fs).is_ok());
-        assert!(validate_url_with_fs("http://localhost:3000/api", &mock_fs).is_ok());
+        assert!(validate_url("https://example.com", &mock_fs).is_ok());
+        assert!(validate_url("http://localhost:3000/api", &mock_fs).is_ok());
 
         // Test file URL with mock file system
-        assert!(validate_url_with_fs("file:///etc/hosts", &mock_fs).is_ok());
+        assert!(validate_url("file:///etc/hosts", &mock_fs).is_ok());
     }
 
     #[test]
@@ -194,27 +190,27 @@ mod tests {
             }
         });
 
-        assert!(validate_url_with_fs("example.com", &mock_fs).is_ok());
-        assert!(validate_url_with_fs("/tmp/test.html", &mock_fs).is_ok());
-        assert!(validate_url_with_fs("./relative/path", &mock_fs).is_ok());
+        assert!(validate_url("example.com", &mock_fs).is_ok());
+        assert!(validate_url("/tmp/test.html", &mock_fs).is_ok());
+        assert!(validate_url("./relative/path", &mock_fs).is_ok());
     }
 
     #[test]
     fn test_dangerous_schemes() {
         let mock_fs = MockFileSystem::new();
-        assert!(validate_url_with_fs("javascript:alert(1)", &mock_fs).is_err());
-        assert!(validate_url_with_fs("data:text/html,<h1>test</h1>", &mock_fs).is_err());
-        assert!(validate_url_with_fs("ftp://example.com", &mock_fs).is_err());
+        assert!(validate_url("javascript:alert(1)", &mock_fs).is_err());
+        assert!(validate_url("data:text/html,<h1>test</h1>", &mock_fs).is_err());
+        assert!(validate_url("ftp://example.com", &mock_fs).is_err());
     }
 
     #[test]
     fn test_path_traversal() {
         let mock_fs = MockFileSystem::new();
-        assert!(validate_url_with_fs("file:///../etc/passwd", &mock_fs).is_err());
-        assert!(validate_url_with_fs("file:///tmp/../../../etc/passwd", &mock_fs).is_err());
+        assert!(validate_url("file:///../etc/passwd", &mock_fs).is_err());
+        assert!(validate_url("file:///tmp/../../../etc/passwd", &mock_fs).is_err());
         // Test case-insensitive percent-encoding detection
-        assert!(validate_url_with_fs("file:///%2E%2E/etc/passwd", &mock_fs).is_err());
-        assert!(validate_url_with_fs("file:///%2E%2E%2F../etc/passwd", &mock_fs).is_err());
+        assert!(validate_url("file:///%2E%2E/etc/passwd", &mock_fs).is_err());
+        assert!(validate_url("file:///%2E%2E%2F../etc/passwd", &mock_fs).is_err());
     }
 
     #[test]
@@ -236,7 +232,7 @@ mod tests {
                 ))
             });
 
-        let result = validate_url_with_fs("file:///nonexistent", &mock_fs).unwrap();
+        let result = validate_url("file:///nonexistent", &mock_fs).unwrap();
         assert!(result.warning.is_some());
         assert!(result.warning.unwrap().contains("File not found"));
     }

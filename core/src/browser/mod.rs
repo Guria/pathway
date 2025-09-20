@@ -180,7 +180,7 @@ pub struct BrowserInventory {
 }
 
 pub fn detect_inventory() -> BrowserInventory {
-    let mut browsers = platform::detect_browsers();
+    let mut browsers = platform::detect_browsers(&crate::filesystem::RealFileSystem);
     deduplicate(&mut browsers);
     browsers.sort_by(|a, b| {
         (

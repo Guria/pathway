@@ -1,4 +1,5 @@
 use super::{BrowserInfo, LaunchCommand, LaunchOutcome, LaunchTarget, SystemDefaultBrowser};
+use crate::filesystem::FileSystem;
 use std::io;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -20,7 +21,7 @@ pub enum LaunchError {
     },
 }
 
-pub fn detect_browsers() -> Vec<BrowserInfo> {
+pub fn detect_browsers<F: FileSystem>(_fs: &F) -> Vec<BrowserInfo> {
     Vec::new()
 }
 

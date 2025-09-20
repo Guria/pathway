@@ -4,8 +4,7 @@ use std::path::{Path, PathBuf};
 #[cfg(test)]
 use mockall::automock;
 
-/// Abstraction over file system operations to enable testing with virtual file systems.
-/// Uses the industry-standard approach with mockall for testing.
+/// File system abstraction for testing.
 #[cfg_attr(test, automock)]
 pub trait FileSystem {
     /// Check if a path exists

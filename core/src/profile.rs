@@ -1,5 +1,5 @@
 use crate::browser::{BrowserInfo, BrowserKind};
-use crate::filesystem::{FileSystem, RealFileSystem};
+use crate::filesystem::FileSystem;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::fs;
@@ -293,12 +293,7 @@ impl ProfileManager {
     /// // let result = ProfileManager::prepare_custom_directory(Path::new(&dir));
     /// // assert!(result.is_ok());
     /// ```
-    pub fn prepare_custom_directory(path: &Path) -> Result<PathBuf, ProfileError> {
-        Self::prepare_custom_directory_with_fs(path, &RealFileSystem)
-    }
-
-    /// Ensure a path exists and is writable using the provided file system.
-    pub fn prepare_custom_directory_with_fs<F: FileSystem>(
+    pub fn prepare_custom_directory<F: FileSystem>(
         path: &Path,
         fs: &F,
     ) -> Result<PathBuf, ProfileError> {
