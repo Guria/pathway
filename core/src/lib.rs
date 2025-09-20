@@ -1,5 +1,6 @@
 pub mod browser;
 pub mod error;
+pub mod filesystem;
 pub mod logging;
 pub mod profile;
 pub mod url;
