@@ -5,7 +5,7 @@ import os
 final class PathwayShim {
     private final class AppDelegate: NSObject, NSApplicationDelegate {
         private static let subsystem = "dev.pathway.router"
-        private let logger = Logger(subsystem: Self.subsystem, category: "shim")
+        private let logger = Logger(subsystem: AppDelegate.subsystem, category: "shim")
         private let eventManager = NSAppleEventManager.shared()
         private let syncQueue = DispatchQueue(label: "dev.pathway.router.shim.queue")
         private var pendingLaunches = 0
@@ -62,8 +62,8 @@ final class PathwayShim {
                 self.pendingLaunches += 1
                 let process = Process()
                 process.executableURL = pathwayURL
-                // Pathway CLI requires the `launch` subcommand.
-                process.arguments = ["launch"] + urls.map { $0.absoluteString }
+                // Pathway CLI requires the `launch` subcommand and `--system-default` flag.
+                process.arguments = ["launch", "--system-default"] + urls.map { $0.absoluteString }
                 self.activeProcesses.append(process)
 
                 var environment = ProcessInfo.processInfo.environment
