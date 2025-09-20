@@ -49,11 +49,14 @@ final class PathwayAppDelegate: NSObject, NSApplicationDelegate {
                 return
             }
 
-            guard let pathwayURL = Bundle.main.url(forResource: "pathway", withExtension: nil) else {
-                self.logger.fault("Unable to locate bundled pathway binary")
+            let candidateURL = Bundle.main.url(forAuxiliaryExecutable: "pathway")
+                ?? Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/pathway")
+            guard FileManager.default.isExecutableFile(atPath: candidateURL.path) else {
+                self.logger.fault("Unable to locate bundled pathway binary at \(candidateURL.path, privacy: .public)")
                 self.scheduleTerminationCheckLocked()
                 return
             }
+            let pathwayURL = candidateURL
 
             self.pendingLaunches += 1
             let process = Process()
