@@ -164,21 +164,32 @@ mod tests {
     fn test_valid_urls() {
         let mut mock_fs = MockFileSystem::new();
 
+        // Use platform-appropriate paths for testing
+        #[cfg(target_os = "windows")]
+        let test_file_path = "C:\\Windows\\System32\\drivers\\etc\\hosts";
+        #[cfg(not(target_os = "windows"))]
+        let test_file_path = "/etc/hosts";
+
+        #[cfg(target_os = "windows")]
+        let test_file_url = "file:///C:/Windows/System32/drivers/etc/hosts";
+        #[cfg(not(target_os = "windows"))]
+        let test_file_url = "file:///etc/hosts";
+
         // Setup mock expectations for file URL test
         mock_fs
             .expect_exists()
-            .with(mockall::predicate::eq(std::path::Path::new("/etc/hosts")))
+            .with(mockall::predicate::eq(std::path::Path::new(test_file_path)))
             .return_const(true);
         mock_fs
             .expect_canonicalize()
-            .with(mockall::predicate::eq(std::path::Path::new("/etc/hosts")))
+            .with(mockall::predicate::eq(std::path::Path::new(test_file_path)))
             .returning(|path| Ok(path.to_path_buf()));
 
         assert!(validate_url("https://example.com", &mock_fs).is_ok());
         assert!(validate_url("http://localhost:3000/api", &mock_fs).is_ok());
 
         // Test file URL with mock file system
-        assert!(validate_url("file:///etc/hosts", &mock_fs).is_ok());
+        assert!(validate_url(test_file_url, &mock_fs).is_ok());
     }
 
     #[test]
@@ -225,14 +236,25 @@ mod tests {
     fn test_file_not_found_warning() {
         let mut mock_fs = MockFileSystem::new();
 
+        // Use platform-appropriate paths for testing
+        #[cfg(target_os = "windows")]
+        let test_file_path = "C:\\nonexistent";
+        #[cfg(not(target_os = "windows"))]
+        let test_file_path = "/nonexistent";
+
+        #[cfg(target_os = "windows")]
+        let test_file_url = "file:///C:/nonexistent";
+        #[cfg(not(target_os = "windows"))]
+        let test_file_url = "file:///nonexistent";
+
         // Setup mock to simulate file not existing
         mock_fs
             .expect_exists()
-            .with(mockall::predicate::eq(std::path::Path::new("/nonexistent")))
+            .with(mockall::predicate::eq(std::path::Path::new(test_file_path)))
             .return_const(false);
         mock_fs
             .expect_canonicalize()
-            .with(mockall::predicate::eq(std::path::Path::new("/nonexistent")))
+            .with(mockall::predicate::eq(std::path::Path::new(test_file_path)))
             .returning(|_| {
                 Err(std::io::Error::new(
                     std::io::ErrorKind::NotFound,
@@ -240,7 +262,7 @@ mod tests {
                 ))
             });
 
-        let result = validate_url("file:///nonexistent", &mock_fs).unwrap();
+        let result = validate_url(test_file_url, &mock_fs).unwrap();
         assert!(result.warning.is_some());
         assert!(result.warning.unwrap().contains("File not found"));
     }
