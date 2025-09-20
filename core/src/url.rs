@@ -1,7 +1,7 @@
 use crate::error::{PathwayError, Result};
 use crate::filesystem::FileSystem;
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use tracing::{debug, warn};
 use url::Url;
 
@@ -70,15 +70,23 @@ pub fn validate_url<F: FileSystem>(input: &str, fs: &F) -> Result<ValidatedUrl> 
 
     // Special handling for file URLs
     let normalized = if url.scheme() == "file" {
-        let path = url.path();
+        // Use to_file_path() for proper cross-platform file path handling
+        let path_buf = match url.to_file_path() {
+            Ok(path) => path,
+            Err(_) => {
+                return Err(PathwayError::InvalidUrl(format!(
+                    "Invalid file URL: {}",
+                    input
+                )));
+            }
+        };
 
-        // Check for path traversal
-        if contains_path_traversal(path) {
-            return Err(PathwayError::PathTraversal(path.to_string()));
+        // Check for path traversal using the string representation
+        let path_str = path_buf.to_string_lossy();
+        if contains_path_traversal(&path_str) {
+            return Err(PathwayError::PathTraversal(path_str.to_string()));
         }
-
         // Try to canonicalize the path
-        let path_buf = PathBuf::from(path);
         match fs.canonicalize(&path_buf) {
             Ok(canonical) => {
                 // Check if file exists
