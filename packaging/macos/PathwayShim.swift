@@ -1,10 +1,9 @@
 import Cocoa
 import os
 
-private let subsystem = "dev.pathway.router"
-
 final class PathwayAppDelegate: NSObject, NSApplicationDelegate {
-    private let logger = Logger(subsystem: subsystem, category: "shim")
+    private static let subsystem = "dev.pathway.router"
+    private let logger = Logger(subsystem: PathwayAppDelegate.subsystem, category: "shim")
     private let eventManager = NSAppleEventManager.shared()
     private let syncQueue = DispatchQueue(label: "dev.pathway.router.shim.queue")
     private var pendingLaunches = 0
@@ -61,7 +60,8 @@ final class PathwayAppDelegate: NSObject, NSApplicationDelegate {
             self.pendingLaunches += 1
             let process = Process()
             process.executableURL = pathwayURL
-            process.arguments = urls.map { $0.absoluteString }
+            // Pathway CLI requires the `launch` subcommand and system-default flag.
+            process.arguments = ["launch", "--system-default"] + urls.map { $0.absoluteString }
             self.activeProcesses.append(process)
 
             var environment = ProcessInfo.processInfo.environment
