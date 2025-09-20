@@ -272,7 +272,11 @@ fn windows_candidates() -> &'static [WindowsBrowserCandidate] {
             channel: BrowserChannel::Dev,
             cli_name: "firefox-developer",
             display_name: "Firefox Developer Edition",
-            relative_paths: &["Firefox Developer Edition/firefox.exe"],
+            relative_paths: &[
+                "Firefox Developer Edition/firefox.exe", // Traditional Windows installation
+                "firefox-developer/current/firefox.exe", // Scoop installation (if available)
+                "firefox-developer/tools/firefox.exe",   // Chocolatey installation (if available)
+            ],
             aliases: &["firefox-dev"],
         },
         WindowsBrowserCandidate {
@@ -288,7 +292,11 @@ fn windows_candidates() -> &'static [WindowsBrowserCandidate] {
             channel: BrowserChannel::Stable,
             cli_name: "edge",
             display_name: "Microsoft Edge",
-            relative_paths: &["Microsoft/Edge/Application/msedge.exe"],
+            relative_paths: &[
+                "Microsoft/Edge/Application/msedge.exe", // Traditional Windows installation
+                "msedge/current/msedge.exe",             // Scoop installation (if available)
+                "msedge/tools/msedge.exe",               // Chocolatey installation (if available)
+            ],
             aliases: &["microsoft-edge"],
         },
         WindowsBrowserCandidate {
@@ -356,7 +364,11 @@ fn windows_candidates() -> &'static [WindowsBrowserCandidate] {
             channel: BrowserChannel::Stable,
             cli_name: "vivaldi",
             display_name: "Vivaldi",
-            relative_paths: &["Vivaldi/Application/vivaldi.exe"],
+            relative_paths: &[
+                "Vivaldi/Application/vivaldi.exe", // Traditional Windows installation
+                "vivaldi/current/vivaldi.exe",     // Scoop installation
+                "vivaldi/tools/vivaldi.exe",       // Chocolatey installation
+            ],
             aliases: &["vivaldi-browser"],
         },
         WindowsBrowserCandidate {
@@ -364,7 +376,11 @@ fn windows_candidates() -> &'static [WindowsBrowserCandidate] {
             channel: BrowserChannel::Stable,
             cli_name: "opera",
             display_name: "Opera",
-            relative_paths: &["Opera/opera.exe"],
+            relative_paths: &[
+                "Opera/opera.exe",         // Traditional Windows installation
+                "opera/current/opera.exe", // Scoop installation
+                "opera/tools/opera.exe",   // Chocolatey installation
+            ],
             aliases: &["opera-browser"],
         },
         WindowsBrowserCandidate {
