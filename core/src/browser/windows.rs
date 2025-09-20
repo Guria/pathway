@@ -507,7 +507,7 @@ fn windows_base_dirs() -> Vec<PathBuf> {
 
     // Chocolatey package manager directories
     if let Some(choco_path) = env::var_os("ChocolateyInstall") {
-        dirs.push(PathBuf::from(choco_path).join("lib"));
+        dirs.push(PathBuf::from(choco_path.clone()).join("lib"));
         dirs.push(PathBuf::from(choco_path).join("bin"));
     }
     dirs.push(PathBuf::from("C:\\ProgramData\\chocolatey\\lib"));
@@ -602,7 +602,6 @@ fn quote_windows_arg(arg: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{determine_installation_source, quote_windows_arg};
-    use std::path::PathBuf;
 
     #[test]
     fn test_quote_windows_arg() {
