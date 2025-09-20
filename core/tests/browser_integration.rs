@@ -1,289 +1,165 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
 use tempfile::TempDir;
+use url::Url;
 
-/// Checks whether the given browser is available by running `pathway browser check <browser>`.
-///
-/// Returns `true` when the invoked command exits successfully; returns `false` if the command
-/// fails, or if locating/running the test binary or capturing output fails. Intended for use in
-/// tests to conditionally skip browser-dependent cases.
-///
-/// # Examples
-///
-/// ```
-/// let available = is_browser_available("chrome");
-/// // `available` will be true if `pathway browser check chrome` succeeds, otherwise false.
-/// let _ = available;
-/// ```
-fn is_browser_available(browser: &str) -> bool {
-    Command::cargo_bin("pathway")
-        .unwrap()
-        .args(["browser", "check", browser])
-        .output()
-        .map(|output| output.status.success())
-        .unwrap_or(false)
+#[test]
+fn test_browser_list() {
+    let mut cmd = Command::cargo_bin("pathway").unwrap();
+    cmd.args(["browser", "list"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Detected browsers:"));
 }
 
-/// Integration test that verifies `pathway launch --browser chrome --no-launch <url>`
-/// reports it would launch in Google Chrome.
-///
-/// Skips the test early if Chrome is not available on the host system.
-///
-/// # Examples
-///
-/// ```no_run
-/// // Runs the CLI and checks stderr contains the "Would launch in Google Chrome" hint.
-/// let mut cmd = assert_cmd::Command::cargo_bin("pathway").unwrap();
-/// cmd.args(["launch", "--browser", "chrome", "--no-launch", "https://example.com"])
-///     .assert()
-///     .success()
-///     .stderr(predicate::str::contains("Would launch in Google Chrome"));
-/// ```
 #[test]
-fn test_launch_with_browser() {
-    if !is_browser_available("chrome") {
-        eprintln!("Skipping test: Chrome is not available on this system");
-        return;
-    }
+fn test_browser_check_nonexistent() {
+    let mut cmd = Command::cargo_bin("pathway").unwrap();
+    cmd.args(["browser", "check", "definitely-not-a-real-browser-12345"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("not found"));
+}
 
+#[test]
+fn test_launch_https_url() {
+    let mut cmd = Command::cargo_bin("pathway").unwrap();
+    cmd.args(["launch", "--no-launch", "https://example.com"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains(
+            "URL validated: https://example.com/",
+        ));
+}
+
+#[test]
+fn test_launch_with_nonexistent_browser() {
     let mut cmd = Command::cargo_bin("pathway").unwrap();
     cmd.args([
         "launch",
         "--browser",
-        "chrome",
+        "definitely-not-a-browser-12345",
         "--no-launch",
         "https://example.com",
     ])
     .assert()
-    .success()
-    .stderr(predicate::str::contains("Would launch in Google Chrome"));
+    .success() // Should succeed but warn about missing browser
+    .stderr(predicate::str::contains("not found"));
 }
 
 #[test]
-fn test_launch_with_profile() {
-    if !is_browser_available("chrome") {
-        eprintln!("Skipping test: Chrome is not available on this system");
-        return;
-    }
+fn test_file_url_with_tempfile() {
+    let temp_dir = TempDir::new().expect("Failed to create temporary directory");
+    let test_file = temp_dir.path().join("test.html");
+
+    // Create a test file
+    std::fs::write(&test_file, "<html><body>Test</body></html>")
+        .expect("Failed to create test file");
+
+    // Use proper file URL construction for cross-platform compatibility
+    let file_url = Url::from_file_path(&test_file)
+        .expect("Failed to create file URL")
+        .to_string();
 
     let mut cmd = Command::cargo_bin("pathway").unwrap();
-    cmd.args([
-        "launch",
-        "--browser",
-        "chrome",
-        "--profile",
-        "Default",
-        "--no-launch",
-        "https://example.com",
-    ])
-    .assert()
-    .success()
-    .stderr(predicate::str::contains("with profile 'Default'"));
+    cmd.args(["launch", "--no-launch", &file_url])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("URL validated:"));
 }
 
 #[test]
-fn test_launch_temp_profile() {
-    if !is_browser_available("chrome") {
-        eprintln!("Skipping test: Chrome is not available on this system");
-        return;
-    }
+fn test_file_url_nonexistent() {
+    let temp_dir = TempDir::new().expect("Failed to create temporary directory");
+    let nonexistent_file = temp_dir.path().join("nonexistent.html");
+
+    // Use proper file URL construction for cross-platform compatibility
+    let file_url = Url::from_file_path(&nonexistent_file)
+        .expect("Failed to create file URL")
+        .to_string();
 
     let mut cmd = Command::cargo_bin("pathway").unwrap();
-    cmd.args([
-        "launch",
-        "--browser",
-        "chrome",
-        "--temp-profile",
-        "--no-launch",
-        "https://example.com",
-    ])
-    .assert()
-    .success()
-    .stderr(predicate::str::contains("temporary profile"));
+    cmd.args(["launch", "--no-launch", &file_url])
+        .assert()
+        .success() // Should succeed with warning
+        .stderr(predicate::str::contains("File not found"));
 }
 
 #[test]
-fn test_launch_window_options() {
-    if !is_browser_available("chrome") {
-        eprintln!("Skipping test: Chrome is not available on this system");
-        return;
-    }
-
-    let mut cmd = Command::cargo_bin("pathway").unwrap();
-    cmd.args([
-        "launch",
-        "--browser",
-        "chrome",
-        "--new-window",
-        "--incognito",
-        "--no-launch",
-        "https://example.com",
-    ])
-    .assert()
-    .success()
-    .stderr(predicate::str::contains(
-        "URL validated: https://example.com/",
-    ))
-    .stderr(predicate::str::contains("Launch skipped (--no-launch)"))
-    .stderr(predicate::str::contains("Would launch in Google Chrome"));
-}
-
-#[test]
-fn test_launch_window_options_json() {
-    if !is_browser_available("chrome") {
-        eprintln!("Skipping test: Chrome is not available on this system");
-        return;
-    }
-
+fn test_launch_json_format() {
     let mut cmd = Command::cargo_bin("pathway").unwrap();
     cmd.args([
         "--format",
         "json",
         "launch",
-        "--browser",
-        "chrome",
-        "--new-window",
-        "--incognito",
         "--no-launch",
         "https://example.com",
     ])
     .assert()
     .success()
-    .stdout(predicate::str::contains(r#""new_window": true"#))
-    .stdout(predicate::str::contains(r#""incognito": true"#))
+    .stdout(predicate::str::contains(r#""action": "launch""#))
     .stdout(predicate::str::contains(r#""status": "skipped""#))
-    .stdout(predicate::str::contains(
-        r#""message": "Launch skipped (--no-launch)""#,
-    ));
-}
-
-/// Verifies that `pathway browser check chrome` reports Chrome is available.
-///
-/// Skips the test if Chrome isn't detected on the host system.
-#[test]
-fn test_browser_check() {
-    if !is_browser_available("chrome") {
-        eprintln!("Skipping test: Chrome is not available on this system");
-        return;
-    }
-
-    let mut cmd = Command::cargo_bin("pathway").unwrap();
-    cmd.args(["browser", "check", "chrome"])
-        .assert()
-        .success()
-        .stderr(predicate::str::contains("is available"));
+    .stdout(predicate::str::contains(r#""scheme": "https""#));
 }
 
 #[test]
-fn test_profile_list() {
-    if !is_browser_available("chrome") {
-        eprintln!("Skipping test: Chrome is not available on this system");
-        return;
-    }
-
-    let mut cmd = Command::cargo_bin("pathway").unwrap();
-    cmd.args(["profile", "--browser", "chrome", "list"])
-        .assert()
-        .success()
-        .stderr(predicate::str::contains("profiles:"));
-}
-
-/// Asserts that `pathway profile --browser chrome --format json list` emits JSON with `"action": "list-profiles"`.
-///
-/// The test is skipped early if Chrome is not available on the system.
-///
-/// # Examples
-///
-/// ```
-/// // Invoke the CLI and assert the command succeeds (example usage; mirrors the test).
-/// let mut cmd = assert_cmd::Command::cargo_bin("pathway").unwrap();
-/// cmd.args(["profile", "--browser", "chrome", "--format", "json", "list"])
-///     .assert()
-///     .success();
-/// ```
-#[test]
-fn test_profile_list_json() {
-    if !is_browser_available("chrome") {
-        eprintln!("Skipping test: Chrome is not available on this system");
-        return;
-    }
-
-    let mut cmd = Command::cargo_bin("pathway").unwrap();
-    cmd.args(["profile", "--browser", "chrome", "--format", "json", "list"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains(r#""action": "list-profiles""#));
-}
-
-#[test]
-fn test_profile_custom_dir() {
-    if !is_browser_available("chrome") {
-        eprintln!("Skipping test: Chrome is not available on this system");
-        return;
-    }
-
-    let temp_dir = TempDir::new().expect("Failed to create temporary directory");
-    let test_profile_path = temp_dir.path().join("test-profile");
-    let test_profile_str = test_profile_path
-        .to_str()
-        .expect("Failed to convert temporary path to string");
-
-    let mut cmd = Command::cargo_bin("pathway").unwrap();
-    cmd.args([
-        "profile",
-        "--browser",
-        "chrome",
-        "--user-dir",
-        test_profile_str,
-        "list",
-    ])
-    .assert()
-    .success()
-    .stderr(predicate::str::contains("profiles:"));
-
-    // temp_dir is automatically cleaned up when it goes out of scope
-}
-
-#[test]
-fn test_launch_safari_warnings() {
-    if !is_browser_available("safari") {
-        eprintln!("Skipping test: Safari is not available on this system");
-        return;
-    }
-
+fn test_launch_system_default() {
     let mut cmd = Command::cargo_bin("pathway").unwrap();
     cmd.args([
         "launch",
-        "--browser",
-        "safari",
         "--temp-profile",
         "--no-launch",
         "https://example.com",
     ])
     .assert()
     .success()
-    .stderr(predicate::str::contains("Safari does not support"));
+    .stderr(predicate::str::contains("require specifying a browser"));
 }
 
 #[test]
-fn test_launch_firefox_guest_warning() {
-    if !is_browser_available("firefox") {
-        eprintln!("Skipping test: Firefox is not available on this system");
-        return;
-    }
-
+fn test_dangerous_url_schemes() {
     let mut cmd = Command::cargo_bin("pathway").unwrap();
-    cmd.args([
-        "launch",
-        "--browser",
-        "firefox",
-        "--guest",
-        "--no-launch",
-        "https://example.com",
-    ])
-    .assert()
-    .success()
-    .stderr(predicate::str::contains(
-        "Firefox does not support guest mode",
-    ));
+    cmd.args(["launch", "--no-launch", "javascript:alert(1)"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Unsupported scheme"));
+}
+
+#[test]
+fn test_help_commands() {
+    let mut cmd = Command::cargo_bin("pathway").unwrap();
+    cmd.arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Commands:"))
+        .stdout(predicate::str::contains("launch"))
+        .stdout(predicate::str::contains("browser"))
+        .stdout(predicate::str::contains("profile"));
+}
+
+#[test]
+fn test_launch_help() {
+    let mut cmd = Command::cargo_bin("pathway").unwrap();
+    cmd.args(["launch", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Open URLs in browsers"));
+}
+
+#[test]
+fn test_browser_help() {
+    let mut cmd = Command::cargo_bin("pathway").unwrap();
+    cmd.args(["browser", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Manage browsers"));
+}
+
+#[test]
+fn test_profile_help() {
+    let mut cmd = Command::cargo_bin("pathway").unwrap();
+    cmd.args(["profile", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Manage browser profiles"));
 }

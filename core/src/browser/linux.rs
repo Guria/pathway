@@ -2,10 +2,11 @@ use super::{
     BrowserChannel, BrowserInfo, BrowserKind, LaunchCommand, LaunchOutcome, LaunchTarget,
     SystemDefaultBrowser,
 };
+use crate::filesystem::{FileSystem, RealFileSystem};
 use std::env;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::{fs, io};
 use thiserror::Error;
 use tracing::debug;
 
@@ -22,12 +23,12 @@ pub enum LaunchError {
     },
 }
 
-pub fn detect_browsers() -> Vec<BrowserInfo> {
+pub fn detect_browsers<F: FileSystem>(fs: &F) -> Vec<BrowserInfo> {
     let mut result = Vec::new();
     let candidates = linux_candidates();
 
     for candidate in candidates {
-        if let Some(info) = resolve_candidate(candidate) {
+        if let Some(info) = resolve_candidate(candidate, fs) {
             result.push(info);
         }
     }
@@ -54,13 +55,13 @@ pub fn detect_browsers() -> Vec<BrowserInfo> {
 /// let sys = &inventory.system_default;
 /// println!("Default browser: {} ({})", sys.display_name, sys.identifier);
 /// ```
-pub fn system_default_browser() -> Option<SystemDefaultBrowser> {
+pub fn system_default_browser_with_fs<F: FileSystem>(fs: &F) -> Option<SystemDefaultBrowser> {
     if let Some(entry) = query_default_desktop_entry() {
         if let Some(candidate) = linux_candidates()
             .iter()
             .find(|candidate| candidate.desktop_entries.contains(&entry.as_str()))
         {
-            if let Some(info) = resolve_candidate(candidate) {
+            if let Some(info) = resolve_candidate(candidate, fs) {
                 return Some(SystemDefaultBrowser {
                     identifier: entry.clone(),
                     display_name: candidate.display_name.to_string(),
@@ -89,6 +90,10 @@ pub fn system_default_browser() -> Option<SystemDefaultBrowser> {
     }
 
     None
+}
+
+pub fn system_default_browser() -> Option<SystemDefaultBrowser> {
+    system_default_browser_with_fs(&RealFileSystem)
 }
 
 /// Launches the given URLs using the specified launch target.
@@ -440,13 +445,16 @@ fn linux_candidates() -> &'static [LinuxBrowserCandidate] {
     CANDIDATES
 }
 
-fn resolve_candidate(candidate: &LinuxBrowserCandidate) -> Option<BrowserInfo> {
-    let search_dirs = linux_search_directories();
+fn resolve_candidate<F: FileSystem>(
+    candidate: &LinuxBrowserCandidate,
+    fs: &F,
+) -> Option<BrowserInfo> {
+    let search_dirs = linux_search_directories(fs);
 
     for binary in candidate.binary_names {
-        let potential = locate_executable(binary, &search_dirs);
+        let potential = locate_executable(binary, &search_dirs, fs);
         if let Some(exec_path) = potential {
-            if !is_executable(&exec_path) {
+            if !is_executable(&exec_path, fs) {
                 continue;
             }
 
@@ -473,7 +481,7 @@ fn resolve_candidate(candidate: &LinuxBrowserCandidate) -> Option<BrowserInfo> {
     None
 }
 
-fn linux_search_directories() -> Vec<PathBuf> {
+fn linux_search_directories<F: FileSystem>(fs: &F) -> Vec<PathBuf> {
     let mut dirs = vec![
         PathBuf::from("/usr/bin"),
         PathBuf::from("/usr/local/bin"),
@@ -486,30 +494,30 @@ fn linux_search_directories() -> Vec<PathBuf> {
         dirs.push(Path::new(&home).join("bin"));
     }
 
-    dirs.extend(flatpak_bin_dirs());
+    dirs.extend(flatpak_bin_dirs(fs));
 
     dirs
 }
 
-fn flatpak_bin_dirs() -> Vec<PathBuf> {
+fn flatpak_bin_dirs<F: FileSystem>(fs: &F) -> Vec<PathBuf> {
     let mut dirs = vec![PathBuf::from("/var/lib/flatpak/exports/bin")];
     if let Ok(home) = env::var("HOME") {
         dirs.push(Path::new(&home).join(".local/share/flatpak/exports/bin"));
     }
 
     // Only add paths that actually exist
-    dirs.into_iter().filter(|path| path.exists()).collect()
+    dirs.into_iter().filter(|path| fs.exists(path)).collect()
 }
 
-fn locate_executable(binary: &str, dirs: &[PathBuf]) -> Option<PathBuf> {
+fn locate_executable<F: FileSystem>(binary: &str, dirs: &[PathBuf], fs: &F) -> Option<PathBuf> {
     let candidate_path = Path::new(binary);
-    if candidate_path.is_absolute() && candidate_path.exists() {
+    if candidate_path.is_absolute() && fs.exists(candidate_path) {
         return Some(candidate_path.to_path_buf());
     }
 
     for dir in dirs {
         let path = dir.join(binary);
-        if path.exists() {
+        if fs.exists(&path) {
             return Some(path);
         }
     }
@@ -518,9 +526,9 @@ fn locate_executable(binary: &str, dirs: &[PathBuf]) -> Option<PathBuf> {
 }
 
 #[cfg(target_family = "unix")]
-fn is_executable(path: &Path) -> bool {
+fn is_executable<F: FileSystem>(path: &Path, fs: &F) -> bool {
     use std::os::unix::fs::PermissionsExt;
-    if let Ok(metadata) = fs::metadata(path) {
+    if let Ok(metadata) = fs.metadata(path) {
         let permissions = metadata.permissions();
         permissions.mode() & 0o111 != 0
     } else {
@@ -529,8 +537,8 @@ fn is_executable(path: &Path) -> bool {
 }
 
 #[cfg(not(target_family = "unix"))]
-fn is_executable(path: &Path) -> bool {
-    path.exists()
+fn is_executable<F: FileSystem>(path: &Path, fs: &F) -> bool {
+    fs.exists(path)
 }
 
 fn query_default_desktop_entry() -> Option<String> {
@@ -549,5 +557,76 @@ fn query_default_desktop_entry() -> Option<String> {
         None
     } else {
         Some(value)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::filesystem::MockFileSystem;
+    use std::os::unix::fs::PermissionsExt;
+    use std::path::PathBuf;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn test_browser_detection_with_mock_fs() {
+        // Create a temporary executable file to get proper metadata
+        let temp_file = NamedTempFile::new().expect("Failed to create temporary file");
+
+        // Set executable permissions on the temp file
+        let mut perms = temp_file.as_file().metadata().unwrap().permissions();
+        perms.set_mode(0o755); // rwxr-xr-x
+        temp_file.as_file().set_permissions(perms).unwrap();
+
+        let mut mock_fs = MockFileSystem::new();
+
+        // Mock that only Chrome exists and is executable
+        mock_fs
+            .expect_exists()
+            .returning(|path| path == Path::new("/usr/bin/google-chrome"));
+
+        // Mock executable permissions check for Chrome using fresh metadata from temp file
+        mock_fs
+            .expect_metadata()
+            .with(mockall::predicate::eq(Path::new("/usr/bin/google-chrome")))
+            .returning(move |_| {
+                // Return fresh metadata from the temp file each time
+                temp_file.as_file().metadata().map_err(|_| {
+                    std::io::Error::new(std::io::ErrorKind::NotFound, "mock metadata error")
+                })
+            });
+
+        let browsers = detect_browsers(&mock_fs);
+
+        // With our mock, we should detect Chrome
+        assert!(browsers.iter().any(|b| b.kind == BrowserKind::Chrome));
+    }
+
+    #[test]
+    fn test_browser_detection_no_browsers() {
+        let mut mock_fs = MockFileSystem::new();
+
+        // Mock that no browser executables exist
+        mock_fs.expect_exists().returning(|_| false);
+
+        let browsers = detect_browsers(&mock_fs);
+
+        // Should find no browsers
+        assert!(browsers.is_empty());
+    }
+
+    #[test]
+    fn test_locate_executable_mock() {
+        let mut mock_fs = MockFileSystem::new();
+
+        mock_fs
+            .expect_exists()
+            .with(mockall::predicate::eq(Path::new("/usr/bin/chrome")))
+            .return_const(true);
+
+        let dirs = vec![PathBuf::from("/usr/bin")];
+        let result = locate_executable("chrome", &dirs, &mock_fs);
+
+        assert_eq!(result, Some(PathBuf::from("/usr/bin/chrome")));
     }
 }

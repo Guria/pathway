@@ -2,6 +2,7 @@ use super::{
     BrowserChannel, BrowserInfo, BrowserKind, LaunchCommand, LaunchOutcome, LaunchTarget,
     SystemDefaultBrowser,
 };
+use crate::filesystem::FileSystem;
 use std::env;
 use std::io;
 use std::path::PathBuf;
@@ -22,10 +23,10 @@ pub enum LaunchError {
     },
 }
 
-pub fn detect_browsers() -> Vec<BrowserInfo> {
+pub fn detect_browsers<F: FileSystem>(fs: &F) -> Vec<BrowserInfo> {
     let mut result = Vec::new();
     for candidate in windows_candidates() {
-        if let Some(info) = resolve_candidate(candidate) {
+        if let Some(info) = resolve_candidate(candidate, fs) {
             result.push(info);
         }
     }
@@ -47,9 +48,14 @@ pub fn detect_browsers() -> Vec<BrowserInfo> {
 /// // so this will be a fallback entry
 /// println!("Default browser: {}", sys.display_name);
 /// ```
-pub fn system_default_browser() -> Option<SystemDefaultBrowser> {
-    // TODO: Implement Windows system default browser detection via registry queries
+pub fn system_default_browser_with_fs<F: crate::filesystem::FileSystem>(
+    _fs: &F,
+) -> Option<SystemDefaultBrowser> {
     None
+}
+
+pub fn system_default_browser() -> Option<SystemDefaultBrowser> {
+    system_default_browser_with_fs(&crate::filesystem::RealFileSystem)
 }
 
 /// Launches the given URLs using the specified target (a specific browser or the system default).
@@ -376,11 +382,14 @@ fn windows_candidates() -> &'static [WindowsBrowserCandidate] {
     CANDIDATES
 }
 
-fn resolve_candidate(candidate: &WindowsBrowserCandidate) -> Option<BrowserInfo> {
+fn resolve_candidate<F: FileSystem>(
+    candidate: &WindowsBrowserCandidate,
+    fs: &F,
+) -> Option<BrowserInfo> {
     for base in windows_base_dirs() {
         for relative in candidate.relative_paths {
             let path = base.join(relative);
-            if path.exists() {
+            if fs.exists(&path) {
                 return Some(BrowserInfo {
                     id: candidate.cli_name.to_string(),
                     cli_name: candidate.cli_name.to_string(),
@@ -437,69 +446,41 @@ fn windows_base_dirs() -> Vec<PathBuf> {
 /// - Backslashes before quotes are doubled to prevent misinterpretation
 /// - Trailing backslashes before the closing quote are doubled
 fn quote_windows_arg(arg: &str) -> String {
-    // Check if quoting is needed (contains space, tab, or quote)
     let needs_quoting = arg.is_empty() || arg.chars().any(|c| c == ' ' || c == '\t' || c == '"');
-
     if !needs_quoting {
         return arg.to_string();
     }
 
-    let mut result = String::with_capacity(arg.len() + 2);
-    result.push('"');
+    let contains_quotes = arg.contains('"');
+    let mut out = String::with_capacity(arg.len() + 2);
+    out.push('"');
+    let mut backslashes = 0;
 
-    let mut i = 0;
-    let chars: Vec<char> = arg.chars().collect();
-
-    while i < chars.len() {
-        match chars[i] {
+    for ch in arg.chars() {
+        match ch {
+            '\\' => backslashes += 1,
             '"' => {
-                // Escape quote with backslash
-                result.push('\\');
-                result.push('"');
-                i += 1;
-            }
-            '\\' => {
-                // Count consecutive backslashes
-                let mut backslash_count = 0;
-                while i < chars.len() && chars[i] == '\\' {
-                    backslash_count += 1;
-                    i += 1;
-                }
-
-                // Check what follows the backslashes
-                let followed_by_quote = i < chars.len() && chars[i] == '"';
-                let at_end = i >= chars.len();
-
-                // If followed by quote or at end, double the backslashes
-                if followed_by_quote || at_end {
-                    for _ in 0..(backslash_count * 2) {
-                        result.push('\\');
-                    }
-                } else {
-                    // If the string contains quotes (which means we need special escaping),
-                    // double all backslashes to prevent them from being interpreted as escapes
-                    let contains_quotes = arg.contains('"');
-                    if contains_quotes {
-                        for _ in 0..(backslash_count * 2) {
-                            result.push('\\');
-                        }
-                    } else {
-                        // Not followed by quote and no quotes in string, keep backslashes as-is
-                        for _ in 0..backslash_count {
-                            result.push('\\');
-                        }
-                    }
-                }
+                // Double the backslashes before the quote, then add one more backslash to escape the quote
+                out.extend(std::iter::repeat_n('\\', backslashes * 2 + 1));
+                out.push('"');
+                backslashes = 0;
             }
             _ => {
-                result.push(chars[i]);
-                i += 1;
+                // If the string contains quotes, double all backslashes to prevent misinterpretation
+                if contains_quotes {
+                    out.extend(std::iter::repeat_n('\\', backslashes * 2));
+                } else {
+                    out.extend(std::iter::repeat_n('\\', backslashes));
+                }
+                backslashes = 0;
+                out.push(ch);
             }
         }
     }
-
-    result.push('"');
-    result
+    // double trailing backslashes before the closing quote
+    out.extend(std::iter::repeat_n('\\', backslashes * 2));
+    out.push('"');
+    out
 }
 
 #[cfg(test)]

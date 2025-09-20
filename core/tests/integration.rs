@@ -1,5 +1,7 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
+use tempfile::TempDir;
+use url::Url;
 
 #[test]
 fn test_launch_https_url() {
@@ -42,6 +44,66 @@ fn test_browser_check_not_found() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("not found"));
+}
+
+/// Test file URL validation with temporary files (VFS approach)
+#[test]
+fn test_launch_file_url_with_tempfile() {
+    let temp_dir = TempDir::new().expect("Failed to create temporary directory");
+    let test_file = temp_dir.path().join("index.html");
+
+    // Create a test file
+    std::fs::write(&test_file, "<html><body>Hello World</body></html>")
+        .expect("Failed to create test file");
+
+    // Use proper file URL construction for cross-platform compatibility
+    let file_url = Url::from_file_path(&test_file)
+        .expect("Failed to create file URL")
+        .to_string();
+
+    let mut cmd = Command::cargo_bin("pathway").unwrap();
+    cmd.args(["launch", "--no-launch", &file_url])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("URL validated:"))
+        .stderr(predicate::str::contains("scheme: file"));
+}
+
+/// Test path traversal detection
+#[test]
+fn test_path_traversal_detection() {
+    let mut cmd = Command::cargo_bin("pathway").unwrap();
+    cmd.args(["launch", "--no-launch", "file:///../etc/passwd"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Path traversal detected"));
+}
+
+/// Test dangerous scheme detection
+#[test]
+fn test_dangerous_scheme_detection() {
+    let mut cmd = Command::cargo_bin("pathway").unwrap();
+    cmd.args(["launch", "--no-launch", "javascript:alert(1)"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Unsupported scheme"));
+}
+
+/// Test JSON output format
+#[test]
+fn test_json_output_format() {
+    let mut cmd = Command::cargo_bin("pathway").unwrap();
+    cmd.args([
+        "--format",
+        "json",
+        "launch",
+        "--no-launch",
+        "https://example.com",
+    ])
+    .assert()
+    .success()
+    .stdout(predicate::str::contains(r#""action": "launch""#))
+    .stdout(predicate::str::contains(r#""scheme": "https""#));
 }
 
 #[test]
