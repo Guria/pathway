@@ -1,4 +1,4 @@
-use crate::browser::channels::{BrowserChannel, ChromiumChannel};
+use crate::browser::channels::{BrowserChannel, ChromiumChannel, OperaChannel};
 use crate::browser::{BrowserInfo, BrowserKind};
 use crate::filesystem::FileSystem;
 use serde::Serialize;
