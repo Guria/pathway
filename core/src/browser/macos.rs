@@ -61,7 +61,7 @@ fn create_browser_info<F: FileSystem>(bundle_id: &str, _fs: &F) -> Option<Browse
     let (kind, channel) = parse_bundle_id(bundle_id)?;
 
     let app_path = get_app_path_from_bundle_id(bundle_id)?;
-    let bundle_url = CFURL::from_path(&app_path, false)?;
+    let bundle_url = CFURL::from_path(&app_path, true)?;
     let bundle = CFBundle::new(bundle_url)?;
 
     let info_dict = bundle.info_dictionary();
@@ -238,12 +238,12 @@ pub fn system_default_browser_with_fs<F: FileSystem>(fs: &F) -> Option<SystemDef
     let bundle_id = default_handler_for_https()?;
 
     if let Some(info) = create_browser_info(&bundle_id, fs) {
-        let path = info.launch_path().map(|p| p.to_path_buf());
+        let path = info.launch_path().to_path_buf();
         return Some(SystemDefaultBrowser {
             identifier: bundle_id,
             display_name: info.display_name,
             kind: Some(info.kind),
-            path,
+            path: Some(path),
         });
     }
 
@@ -311,9 +311,7 @@ pub fn launch_with_profile(
                     command: cmd,
                 })
             } else {
-                let exec = info
-                    .launch_path()
-                    .ok_or_else(|| LaunchError::MissingExecutable(info.display_name.clone()))?;
+                let exec = info.launch_path();
 
                 let mut command = Command::new(exec);
 

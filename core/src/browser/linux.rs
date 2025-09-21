@@ -132,12 +132,12 @@ pub fn system_default_browser_with_fs<F: FileSystem>(fs: &F) -> Option<SystemDef
     let content = fs.read_to_string(&desktop_path).ok()?;
 
     if let Some(info) = create_browser_info(&desktop_path, &content) {
-        let path = info.launch_path().map(Path::to_path_buf);
+        let path = info.launch_path().to_path_buf();
         return Some(SystemDefaultBrowser {
             identifier: desktop_id,
             display_name: info.display_name,
             kind: Some(info.kind),
-            path,
+            path: Some(path),
         });
     }
 
@@ -209,11 +209,14 @@ fn desktop_file_dirs() -> Vec<PathBuf> {
 }
 
 fn get_desktop_entry_value<'a>(content: &'a str, key: &str) -> Option<&'a str> {
-    content
-        .lines()
-        .find(|line| line.starts_with(key))
-        .and_then(|line| line.split_once('='))
-        .map(|(_, value)| value.trim())
+    content.lines().find_map(|line| {
+        let (lhs, rhs) = line.split_once('=')?;
+        if lhs.trim() == key {
+            Some(rhs.trim())
+        } else {
+            None
+        }
+    })
 }
 
 fn is_web_browser(content: &str) -> bool {
@@ -268,9 +271,7 @@ fn prepare_launch_command(
         }
     }
 
-    let exec = info
-        .launch_path()
-        .ok_or_else(|| LaunchError::MissingExecutable(info.display_name.clone()))?;
+    let exec = info.launch_path();
 
     Ok((exec.to_path_buf(), Vec::new(), false))
 }
@@ -501,7 +502,7 @@ fn classify_browser_from_token(token: &str) -> Option<(BrowserKind, BrowserChann
         return Some((BrowserKind::Waterfox, BrowserChannel::Single));
     }
 
-    if token.contains("zen") || token.contains("arc") {
+    if token.contains("arc") {
         return Some((BrowserKind::Arc, BrowserChannel::Single));
     }
 

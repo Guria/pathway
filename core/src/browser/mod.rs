@@ -112,8 +112,8 @@ impl From<BrowserInfo> for BasicBrowserInfo {
 }
 
 impl BrowserInfo {
-    pub fn launch_path(&self) -> Option<&std::path::Path> {
-        Some(&self.executable_path)
+    pub fn launch_path(&self) -> &std::path::Path {
+        &self.executable_path
     }
 
     pub fn alias(&self) -> String {

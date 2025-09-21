@@ -6,9 +6,10 @@ use winreg::enums::*;
 use winreg::RegKey;
 
 use super::{LaunchCommand, LaunchOutcome, LaunchTarget, SystemDefaultBrowser};
+use std::collections::HashSet;
 use std::process::{Command, Stdio};
 use thiserror::Error;
-use tracing::debug;
+use tracing::{debug, warn};
 
 #[derive(Debug, Error)]
 pub enum LaunchError {
@@ -38,9 +39,7 @@ pub fn launch_with_profile(
 
     match target {
         LaunchTarget::Browser(info) => {
-            let exec = info
-                .launch_path()
-                .ok_or_else(|| LaunchError::MissingExecutable(info.display_name.clone()))?;
+            let exec = info.launch_path();
 
             let mut command = Command::new(exec);
 
@@ -123,12 +122,12 @@ pub fn system_default_browser_with_fs<F: FileSystem>(_fs: &F) -> Option<SystemDe
     let prog_id = default_prog_id()?;
 
     if let Some(info) = browser_info_for_prog_id(&prog_id) {
-        let path = info.launch_path().map(|p| p.to_path_buf());
+        let path = info.launch_path().to_path_buf();
         return Some(SystemDefaultBrowser {
             identifier: prog_id,
             display_name: info.display_name,
             kind: Some(info.kind),
-            path,
+            path: Some(path),
         });
     }
 
@@ -138,23 +137,73 @@ pub fn system_default_browser_with_fs<F: FileSystem>(_fs: &F) -> Option<SystemDe
 
 pub fn detect_browsers<F: FileSystem>(_fs: &F) -> Vec<BrowserInfo> {
     let mut browsers = Vec::new();
+    let mut seen = HashSet::new();
     let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
 
     let search_path = "SOFTWARE\\Clients\\StartMenuInternet";
+    let registries = [(&hkcu, "HKCU"), (&hklm, "HKLM")];
 
-    // Search both HKLM and HKCU
-    for key in [&hklm, &hkcu] {
-        if let Ok(internet_clients) = key.open_subkey(search_path) {
-            for client_name in internet_clients.enum_keys().filter_map(Result::ok) {
-                if let Some(browser_info) = create_browser_info(key, search_path, &client_name) {
-                    browsers.push(browser_info);
+    for (key, hive_name) in registries {
+        match key.open_subkey(search_path) {
+            Ok(internet_clients) => {
+                for entry in internet_clients.enum_keys() {
+                    match entry {
+                        Ok(client_name) => {
+                            match create_browser_info(key, search_path, &client_name) {
+                                Some(browser_info) => {
+                                    let stable_id = format!(
+                                        "{}|{}",
+                                        client_name.to_ascii_lowercase(),
+                                        browser_info
+                                            .executable_path
+                                            .to_string_lossy()
+                                            .to_ascii_lowercase()
+                                    );
+
+                                    if seen.insert(stable_id) {
+                                        browsers.push(browser_info);
+                                    } else {
+                                        debug!(
+                                            hive = hive_name,
+                                            search_path = search_path,
+                                            client = %client_name,
+                                            "Duplicate browser entry skipped"
+                                        );
+                                    }
+                                }
+                                None => {
+                                    warn!(
+                                        hive = hive_name,
+                                        search_path = search_path,
+                                        client = %client_name,
+                                        "Failed to create BrowserInfo from registry entry"
+                                    );
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            warn!(
+                                hive = hive_name,
+                                search_path = search_path,
+                                error = ?err,
+                                "Failed to enumerate registry subkey"
+                            );
+                        }
+                    }
                 }
+            }
+            Err(err) => {
+                warn!(
+                    hive = hive_name,
+                    search_path = search_path,
+                    error = ?err,
+                    "Failed to open registry path"
+                );
             }
         }
     }
 
-    // TODO: Deduplicate browsers
     browsers
 }
 

@@ -738,14 +738,33 @@ impl ProfileManager {
                 ),
                 BrowserKind::Brave => (
                     local_app_data.clone(),
-                    &["BraveSoftware", "Brave-Browser", "User Data"],
+                    match browser.channel {
+                        BrowserChannel::Chromium(ChromiumChannel::Beta) => {
+                            &["BraveSoftware", "Brave-Browser-Beta", "User Data"]
+                        }
+                        BrowserChannel::Chromium(ChromiumChannel::Dev) => {
+                            &["BraveSoftware", "Brave-Browser-Dev", "User Data"]
+                        }
+                        BrowserChannel::Chromium(ChromiumChannel::Canary) => {
+                            &["BraveSoftware", "Brave-Browser-Nightly", "User Data"]
+                        }
+                        _ => &["BraveSoftware", "Brave-Browser", "User Data"],
+                    },
                 ),
                 BrowserKind::Vivaldi => (local_app_data.clone(), &["Vivaldi", "User Data"]),
                 BrowserKind::Arc => (local_app_data.clone(), &["Arc", "User Data"]),
                 BrowserKind::Helium => (local_app_data.clone(), &["Helium", "User Data"]),
                 BrowserKind::Opera => (
                     roaming_app_data.clone(),
-                    &["Opera Software", "Opera Stable"],
+                    match browser.channel {
+                        BrowserChannel::Opera(OperaChannel::Beta) => {
+                            &["Opera Software", "Opera Beta"]
+                        }
+                        BrowserChannel::Opera(OperaChannel::Gx) => {
+                            &["Opera Software", "Opera GX Stable"]
+                        }
+                        _ => &["Opera Software", "Opera Stable"],
+                    },
                 ), // Note: Opera stores data under Roaming
                 BrowserKind::Chromium => (local_app_data.clone(), &["Chromium", "User Data"]),
                 _ => {

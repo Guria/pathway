@@ -99,9 +99,7 @@ pub fn launch_with_profile(
 
     match target {
         LaunchTarget::Browser(info) => {
-            let exec = info
-                .launch_path()
-                .ok_or_else(|| LaunchError::MissingExecutable(info.display_name.clone()))?;
+            let exec = info.launch_path();
 
             let mut command = Command::new(exec);
             command.args(urls);

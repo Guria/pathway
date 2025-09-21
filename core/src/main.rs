@@ -210,7 +210,7 @@ struct CheckJsonResponse {
     action: &'static str,
     browser: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    channel: Option<BrowserChannel>,
+    channel: Option<String>,
     available: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     resolved: Option<BrowserInfo>,
@@ -1032,7 +1032,7 @@ fn handle_browser_command(
                     let response = CheckJsonResponse {
                         action: "check-browser",
                         browser: browser.to_string(),
-                        channel: None, // requested_channel,
+                        channel: channel.clone(),
                         available: result.is_some(),
                         resolved: result.cloned(),
                         message: if result.is_none() {
