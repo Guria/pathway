@@ -1,6 +1,6 @@
 use serde::Serialize;
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 #[cfg(target_os = "macos")]
 mod macos;
@@ -21,6 +21,11 @@ use windows as platform;
 mod unknown;
 #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
 use unknown as platform;
+
+pub mod channels;
+
+pub use self::channels::BrowserChannel;
+use self::channels::{ChromiumChannel, FirefoxChannel, SafariChannel};
 
 pub use platform::LaunchError;
 
@@ -62,53 +67,64 @@ impl BrowserKind {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Default)]
-#[serde(rename_all = "kebab-case")]
-pub enum BrowserChannel {
-    #[default]
-    Stable,
-    Beta,
-    Dev,
-    Canary,
-    Nightly,
-    Unknown,
+// Basic browser info (used for inventory operations)
+#[derive(Debug, Clone, Serialize)]
+pub struct BasicBrowserInfo {
+    pub kind: BrowserKind,
+    pub channel: BrowserChannel,
+    pub display_name: String,
+    pub executable_path: PathBuf,
+    pub version: Option<String>,
+    // A unique, stable identifier for this specific installation.
+    // e.g., macOS bundle ID, Windows registry path, or Linux .desktop file path.
+    pub unique_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exec_command: Option<String>,
 }
 
-impl BrowserChannel {
-    pub fn canonical_name(self) -> &'static str {
-        match self {
-            BrowserChannel::Stable => "stable",
-            BrowserChannel::Beta => "beta",
-            BrowserChannel::Dev => "dev",
-            BrowserChannel::Canary => "canary",
-            BrowserChannel::Nightly => "nightly",
-            BrowserChannel::Unknown => "unknown",
+// Full browser info used at runtime
+#[derive(Debug, Clone, Serialize)]
+pub struct BrowserInfo {
+    pub kind: BrowserKind,
+    pub channel: BrowserChannel,
+    pub display_name: String,
+    pub executable_path: PathBuf,
+    pub version: Option<String>,
+    // A unique, stable identifier for this specific installation.
+    // e.g., macOS bundle ID, Windows registry path, or Linux .desktop file path.
+    pub unique_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exec_command: Option<String>,
+}
+
+impl From<BrowserInfo> for BasicBrowserInfo {
+    fn from(info: BrowserInfo) -> Self {
+        BasicBrowserInfo {
+            kind: info.kind,
+            channel: info.channel,
+            display_name: info.display_name,
+            executable_path: info.executable_path,
+            version: info.version,
+            unique_id: info.unique_id,
+            exec_command: info.exec_command,
         }
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
-pub struct BrowserInfo {
-    pub id: String,
-    pub cli_name: String,
-    pub display_name: String,
-    pub kind: BrowserKind,
-    pub channel: BrowserChannel,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub aliases: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub bundle_path: Option<PathBuf>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub executable: Option<PathBuf>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub bundle_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub version: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub source: Option<String>,
-}
-
 impl BrowserInfo {
+    pub fn launch_path(&self) -> &std::path::Path {
+        &self.executable_path
+    }
+
+    pub fn alias(&self) -> String {
+        let channel_name = self.channel.canonical_name();
+        if channel_name == "stable" {
+            self.kind.canonical_name().to_string()
+        } else {
+            format!("{}-{}", self.kind.canonical_name(), channel_name)
+        }
+    }
+
     pub fn matches_token(&self, token: &str, channel: Option<BrowserChannel>) -> bool {
         let normalized = normalize_token(token);
         self.matches_normalized_token(&normalized, channel)
@@ -129,19 +145,27 @@ impl BrowserInfo {
             }
         }
 
-        if normalized == self.cli_name {
-            return true;
-        }
-
+        // Match kind name
         if normalized == self.kind.canonical_name() {
             return true;
         }
 
-        self.aliases.iter().any(|alias| alias == normalized)
-    }
+        // Match display name normalized
+        if normalized == normalize_token(&self.display_name) {
+            return true;
+        }
 
-    pub fn launch_path(&self) -> Option<&Path> {
-        self.executable.as_deref()
+        // Match combination patterns like "chrome-beta", "firefox-nightly"
+        let kind_channel = format!(
+            "{}-{}",
+            self.kind.canonical_name(),
+            self.channel.canonical_name()
+        );
+        if normalized == kind_channel {
+            return true;
+        }
+
+        false
     }
 }
 
@@ -156,8 +180,6 @@ pub struct SystemDefaultBrowser {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub kind: Option<BrowserKind>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub channel: Option<BrowserChannel>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<PathBuf>,
 }
 
@@ -167,7 +189,6 @@ impl SystemDefaultBrowser {
             identifier: "system-default".to_string(),
             display_name: "System default".to_string(),
             kind: None,
-            channel: None,
             path: None,
         }
     }
@@ -180,20 +201,8 @@ pub struct BrowserInventory {
 }
 
 pub fn detect_inventory_with_fs<F: crate::filesystem::FileSystem>(fs: &F) -> BrowserInventory {
-    let mut browsers = platform::detect_browsers(fs);
-    deduplicate(&mut browsers);
-    browsers.sort_by(|a, b| {
-        (
-            a.kind.canonical_name(),
-            a.channel.canonical_name(),
-            &a.display_name,
-        )
-            .cmp(&(
-                b.kind.canonical_name(),
-                b.channel.canonical_name(),
-                &b.display_name,
-            ))
-    });
+    let browsers = dedupe_browsers(platform::detect_browsers(fs));
+    // TODO: sort
     BrowserInventory {
         browsers,
         system_default: platform::system_default_browser_with_fs(fs)
@@ -203,11 +212,6 @@ pub fn detect_inventory_with_fs<F: crate::filesystem::FileSystem>(fs: &F) -> Bro
 
 pub fn detect_inventory() -> BrowserInventory {
     detect_inventory_with_fs(&crate::filesystem::RealFileSystem)
-}
-
-fn deduplicate(browsers: &mut Vec<BrowserInfo>) {
-    let mut seen: HashSet<String> = HashSet::new();
-    browsers.retain(|browser| seen.insert(browser.cli_name.clone()));
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -232,55 +236,11 @@ pub enum LaunchTarget<'a> {
 }
 
 /// Launches the given URLs using the specified launch target.
-///
-/// Returns a `LaunchOutcome` on success or a platform-specific `LaunchError` on failure.
-///
-/// # Examples
-///
-/// ```no_run
-/// use pathway::{launch, LaunchTarget, detect_inventory};
-///
-/// let inventory = detect_inventory();
-/// let urls = vec!["https://example.com".to_string()];
-/// let outcome = launch(LaunchTarget::SystemDefault, &urls);
-/// match outcome {
-///     Ok(o) => println!("Launched: {}", o.command.display),
-///     Err(e) => eprintln!("Launch failed: {}", e),
-/// }
-/// ```
 pub fn launch(target: LaunchTarget<'_>, urls: &[String]) -> Result<LaunchOutcome, LaunchError> {
     platform::launch(target, urls)
 }
 
 /// Launches a browser target with the given URLs, optionally specifying profile and window options.
-///
-/// This is a thin wrapper that delegates to the platform-specific `launch_with_profile` implementation.
-///
-/// # Parameters
-///
-/// - `target`: the launch target (a specific browser or the system default).
-/// - `urls`: list of URL strings to open.
-/// - `profile_opts`: optional profile-related options (e.g., profile name or path).
-/// - `window_opts`: optional window-related options (e.g., new window or focus behavior).
-///
-/// # Returns
-///
-/// Returns `Ok(LaunchOutcome)` on success, or `Err(LaunchError)` if the platform-specific launch failed.
-///
-/// # Examples
-///
-/// ```no_run
-/// use pathway::{launch_with_profile, LaunchTarget, detect_inventory, ProfileOptions, ProfileType, WindowOptions};
-///
-/// let inventory = detect_inventory();
-/// let urls = vec!["https://example.com".to_string()];
-/// let profile_opts = ProfileOptions {
-///     profile_type: ProfileType::Default,
-///     custom_args: Vec::new(),
-/// };
-/// let window_opts = WindowOptions::default();
-/// let outcome = launch_with_profile(LaunchTarget::SystemDefault, &urls, Some(&profile_opts), Some(&window_opts));
-/// ```
 pub fn launch_with_profile(
     target: LaunchTarget<'_>,
     urls: &[String],
@@ -290,30 +250,6 @@ pub fn launch_with_profile(
     platform::launch_with_profile(target, urls, profile_opts, window_opts)
 }
 
-/// Finds the first browser in `browsers` that matches `token`, optionally constrained to `channel`.
-///
-/// The `token` is normalized (trimmed, lowercased, spaces/underscores → dashes) before matching.
-/// Matching prioritizes exact CLI name matches first, then falls back to kind/alias matching.
-/// If `channel` is specified, only browsers with that channel are considered.
-///
-/// Returns a reference to the first matching `BrowserInfo`, or `None` if no match is found.
-///
-/// # Examples
-///
-/// ```no_run
-/// use pathway::{find_browser, detect_inventory, BrowserChannel};
-///
-/// let inventory = detect_inventory();
-///
-/// // Find Chrome stable
-/// let chrome = find_browser(&inventory.browsers, "chrome", None);
-///
-/// // Find Chrome canary specifically  
-/// let canary = find_browser(&inventory.browsers, "chrome", Some(BrowserChannel::Canary));
-///
-/// // Find by alias
-/// let chrome_alias = find_browser(&inventory.browsers, "google-chrome", None);
-/// ```
 pub fn find_browser<'a>(
     browsers: &'a [BrowserInfo],
     token: &str,
@@ -321,27 +257,77 @@ pub fn find_browser<'a>(
 ) -> Option<&'a BrowserInfo> {
     let normalized = normalize_token(token);
 
-    // First, try to find an exact CLI name match
-    if let Some(browser) = browsers.iter().find(|browser| {
-        if let Some(requested) = channel {
-            if requested != browser.channel {
-                return false;
-            }
-        }
-        normalized == browser.cli_name
-    }) {
-        return Some(browser);
-    }
-
-    // Then fall back to kind/alias matching using the already normalized token
+    // Find browsers matching the token and channel
     browsers
         .iter()
         .find(|browser| browser.matches_normalized_token(&normalized, channel))
 }
 
 pub fn available_tokens(browsers: &[BrowserInfo]) -> Vec<String> {
-    browsers
-        .iter()
-        .map(|browser| browser.cli_name.clone())
-        .collect()
+    let mut tokens = Vec::new();
+
+    for browser in browsers {
+        // Add kind name
+        tokens.push(browser.kind.canonical_name().to_string());
+
+        // Add kind-channel combination
+        let kind_channel = format!(
+            "{}-{}",
+            browser.kind.canonical_name(),
+            browser.channel.canonical_name()
+        );
+        tokens.push(kind_channel);
+    }
+
+    tokens.sort();
+    tokens.dedup();
+    tokens
+}
+
+fn dedupe_browsers(browsers: Vec<BrowserInfo>) -> Vec<BrowserInfo> {
+    let mut seen = HashSet::new();
+    let mut unique = Vec::new();
+
+    for browser in browsers {
+        let signature = browser
+            .exec_command
+            .clone()
+            .unwrap_or_else(|| browser.executable_path.to_string_lossy().to_string());
+
+        let key = format!(
+            "{}|{}|{}",
+            browser.kind.canonical_name(),
+            browser.channel.canonical_name(),
+            signature
+        );
+
+        if seen.insert(key) {
+            unique.push(browser);
+        }
+    }
+
+    unique
+}
+
+pub fn default_channel_priority(channel: &BrowserChannel) -> u8 {
+    match channel {
+        BrowserChannel::Chromium(ch) => match ch {
+            ChromiumChannel::Stable => 0,
+            ChromiumChannel::Beta => 1,
+            ChromiumChannel::Dev => 2,
+            ChromiumChannel::Canary => 3,
+        },
+        BrowserChannel::Firefox(ch) => match ch {
+            FirefoxChannel::Stable => 0,
+            FirefoxChannel::Esr => 1,
+            FirefoxChannel::Beta => 2,
+            FirefoxChannel::Dev => 3,
+            FirefoxChannel::Nightly => 4,
+        },
+        BrowserChannel::Safari(ch) => match ch {
+            SafariChannel::Stable => 0,
+            SafariChannel::TechnologyPreview => 1,
+        },
+        BrowserChannel::Single => 0,
+    }
 }

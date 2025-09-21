@@ -6,9 +6,8 @@ pub mod profile;
 pub mod url;
 
 pub use browser::{
-    available_tokens, detect_inventory, find_browser, launch, launch_with_profile, BrowserChannel,
-    BrowserInfo, BrowserInventory, BrowserKind, LaunchCommand, LaunchError, LaunchOutcome,
-    LaunchTarget, SystemDefaultBrowser,
+    detect_inventory, launch, launch_with_profile, BrowserChannel, BrowserInfo, BrowserInventory,
+    BrowserKind, LaunchCommand, LaunchError, LaunchOutcome, LaunchTarget, SystemDefaultBrowser,
 };
 pub use error::{PathwayError, Result};
 pub use profile::{

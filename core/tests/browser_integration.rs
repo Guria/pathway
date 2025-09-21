@@ -15,10 +15,15 @@ fn test_browser_list() {
 #[test]
 fn test_browser_check_nonexistent() {
     let mut cmd = Command::cargo_bin("pathway").unwrap();
-    cmd.args(["browser", "check", "definitely-not-a-real-browser-12345"])
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("not found"));
+    cmd.args([
+        "browser",
+        "check",
+        "--browser",
+        "definitely-not-a-real-browser-12345",
+    ])
+    .assert()
+    .failure()
+    .stderr(predicate::str::contains("not found"));
 }
 
 #[test]
