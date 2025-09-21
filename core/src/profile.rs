@@ -685,13 +685,17 @@ impl ProfileManager {
                     )))
                 }
             };
-            // On linux, channels often have suffixes like -beta, -unstable
-            let channel_suffix = match browser.channel {
-                BrowserChannel::Chromium(ChromiumChannel::Beta) => "-beta",
-                BrowserChannel::Chromium(ChromiumChannel::Dev) => "-unstable", // for chrome
-                _ => "",
+            // Only Google Chrome uses the generic -beta / -unstable suffix naming on Linux.
+            let resolved_dir = match (browser.kind, browser.channel) {
+                (BrowserKind::Chrome, BrowserChannel::Chromium(ChromiumChannel::Beta)) => {
+                    format!("{dir_name}-beta")
+                }
+                (BrowserKind::Chrome, BrowserChannel::Chromium(ChromiumChannel::Dev)) => {
+                    format!("{dir_name}-unstable")
+                }
+                _ => dir_name.to_string(),
             };
-            Ok(config.join(format!("{}{}", dir_name, channel_suffix)))
+            Ok(config.join(resolved_dir))
         }
 
         #[cfg(target_os = "windows")]
