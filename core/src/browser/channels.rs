@@ -41,23 +41,6 @@ impl FirefoxChannel {
 }
 
 #[derive(Debug, Serialize, PartialEq, Eq, Clone, Copy)]
-pub enum OperaChannel {
-    Stable,
-    Beta,
-    Gx,
-}
-
-impl OperaChannel {
-    pub fn canonical_name(self) -> &'static str {
-        match self {
-            OperaChannel::Stable => "stable",
-            OperaChannel::Beta => "beta",
-            OperaChannel::Gx => "gx",
-        }
-    }
-}
-
-#[derive(Debug, Serialize, PartialEq, Eq, Clone, Copy)]
 pub enum SafariChannel {
     Stable,
     TechnologyPreview,
@@ -77,7 +60,6 @@ impl SafariChannel {
 pub enum BrowserChannel {
     Chromium(ChromiumChannel),
     Firefox(FirefoxChannel),
-    Opera(OperaChannel),
     Safari(SafariChannel),
     /// Represents browsers that have a single release channel
     Single,
@@ -88,7 +70,6 @@ impl BrowserChannel {
         match self {
             BrowserChannel::Chromium(c) => c.canonical_name(),
             BrowserChannel::Firefox(c) => c.canonical_name(),
-            BrowserChannel::Opera(c) => c.canonical_name(),
             BrowserChannel::Safari(c) => c.canonical_name(),
             BrowserChannel::Single => "stable",
         }

@@ -1,5 +1,5 @@
 use super::{BrowserInfo, BrowserKind};
-use crate::browser::channels::{BrowserChannel, ChromiumChannel, FirefoxChannel, OperaChannel};
+use crate::browser::channels::{BrowserChannel, ChromiumChannel, FirefoxChannel};
 use crate::filesystem::FileSystem;
 use std::path::PathBuf;
 use winreg::enums::*;
@@ -300,15 +300,6 @@ fn parse_client_name(
             ChromiumChannel::Stable
         };
         (BrowserKind::Brave, BrowserChannel::Chromium(channel))
-    } else if name.contains("opera") {
-        let channel = if client.contains("gx") {
-            OperaChannel::Gx
-        } else if client.contains("beta") {
-            OperaChannel::Beta
-        } else {
-            OperaChannel::Stable
-        };
-        (BrowserKind::Opera, BrowserChannel::Opera(channel))
     } else if name.contains("vivaldi") || client.contains("vivaldi") {
         (BrowserKind::Vivaldi, BrowserChannel::Single)
     } else if client.contains("tor") || name.contains("tor") {
@@ -483,10 +474,6 @@ where
 
         if lowered.contains("vivaldi") {
             return Some(BrowserKind::Vivaldi);
-        }
-
-        if lowered.contains("opera") {
-            return Some(BrowserKind::Opera);
         }
 
         if lowered.contains("tor") {

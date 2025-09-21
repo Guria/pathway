@@ -1,4 +1,4 @@
-use crate::browser::channels::{BrowserChannel, ChromiumChannel, OperaChannel};
+use crate::browser::channels::{BrowserChannel, ChromiumChannel};
 use crate::browser::{BrowserInfo, BrowserKind};
 use crate::filesystem::FileSystem;
 use serde::Serialize;
@@ -110,7 +110,6 @@ impl ProfileManager {
             | BrowserKind::Vivaldi
             | BrowserKind::Arc
             | BrowserKind::Helium
-            | BrowserKind::Opera
             | BrowserKind::Chromium => {
                 Self::discover_chromium_profiles_in_dir(browser, custom_base_dir)
             }
@@ -119,6 +118,21 @@ impl ProfileManager {
             }
             BrowserKind::Safari => {
                 // Safari doesn't support multiple profiles
+                let path = match custom_base_dir {
+                    Some(dir) => dir.to_path_buf(),
+                    None => Self::get_default_browser_dir(browser)?,
+                };
+                Ok(vec![ProfileInfo {
+                    name: "default".to_string(),
+                    display_name: "Default".to_string(),
+                    path,
+                    is_default: true,
+                    last_used: None,
+                    browser_kind: browser.kind,
+                }])
+            }
+            BrowserKind::Opera => {
+                // Opera uses Chromium-based profiles but we don't have channel support yet
                 let path = match custom_base_dir {
                     Some(dir) => dir.to_path_buf(),
                     None => Self::get_default_browser_dir(browser)?,
@@ -239,7 +253,6 @@ impl ProfileManager {
             | BrowserKind::Vivaldi
             | BrowserKind::Arc
             | BrowserKind::Helium
-            | BrowserKind::Opera
             | BrowserKind::Chromium => {
                 args.extend(Self::chromium_profile_args(
                     browser,
@@ -256,6 +269,14 @@ impl ProfileManager {
             }
             BrowserKind::Safari => {
                 args.extend(Self::safari_profile_args(profile_opts, window_opts));
+            }
+            BrowserKind::Opera => {
+                // Opera uses Chromium-based arguments but we don't have channel support yet
+                args.extend(Self::chromium_profile_args(
+                    browser,
+                    profile_opts,
+                    window_opts,
+                ));
             }
             _ => {
                 // Other browsers - basic window management only
@@ -649,7 +670,6 @@ impl ProfileManager {
                 BrowserKind::Vivaldi => "Vivaldi",
                 BrowserKind::Arc => "Arc",
                 BrowserKind::Helium => "net.imput.helium",
-                BrowserKind::Opera => "com.operasoftware.Opera", // TODO: Handle OperaChannel variants (Beta, GX)
                 BrowserKind::Chromium => "Chromium",
                 _ => {
                     return Err(ProfileError::UnsupportedBrowser(format!(
@@ -671,7 +691,6 @@ impl ProfileManager {
                 BrowserKind::Vivaldi => "vivaldi",
                 BrowserKind::Arc => "arc",
                 BrowserKind::Helium => "helium",
-                BrowserKind::Opera => "opera", // TODO: Handle OperaChannel variants (Beta, GX)
                 BrowserKind::Chromium => "chromium",
                 _ => {
                     return Err(ProfileError::UnsupportedBrowser(format!(
@@ -696,7 +715,7 @@ impl ProfileManager {
         #[cfg(target_os = "windows")]
         {
             let local_app_data = home.join("AppData").join("Local");
-            let roaming_app_data = home.join("AppData").join("Roaming");
+            let _roaming_app_data = home.join("AppData").join("Roaming");
 
             let (mut base_path, components): (PathBuf, &'static [&'static str]) = match browser.kind
             {
@@ -754,18 +773,6 @@ impl ProfileManager {
                 BrowserKind::Vivaldi => (local_app_data.clone(), &["Vivaldi", "User Data"]),
                 BrowserKind::Arc => (local_app_data.clone(), &["Arc", "User Data"]),
                 BrowserKind::Helium => (local_app_data.clone(), &["Helium", "User Data"]),
-                BrowserKind::Opera => (
-                    roaming_app_data.clone(),
-                    match browser.channel {
-                        BrowserChannel::Opera(OperaChannel::Beta) => {
-                            &["Opera Software", "Opera Beta"]
-                        }
-                        BrowserChannel::Opera(OperaChannel::Gx) => {
-                            &["Opera Software", "Opera GX Stable"]
-                        }
-                        _ => &["Opera Software", "Opera Stable"],
-                    },
-                ), // Note: Opera stores data under Roaming
                 BrowserKind::Chromium => (local_app_data.clone(), &["Chromium", "User Data"]),
                 _ => {
                     return Err(ProfileError::UnsupportedBrowser(format!(

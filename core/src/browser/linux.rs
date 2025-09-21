@@ -1,5 +1,5 @@
 use super::{BrowserInfo, BrowserKind};
-use crate::browser::channels::{BrowserChannel, ChromiumChannel, FirefoxChannel, OperaChannel};
+use crate::browser::channels::{BrowserChannel, ChromiumChannel, FirefoxChannel};
 use crate::filesystem::FileSystem;
 use std::collections::HashSet;
 use std::env;
@@ -477,17 +477,6 @@ fn classify_browser_from_token(token: &str) -> Option<(BrowserKind, BrowserChann
             ChromiumChannel::Stable
         };
         return Some((BrowserKind::Brave, BrowserChannel::Chromium(channel)));
-    }
-
-    if token.contains("opera") {
-        let channel = if token.contains("gx") {
-            OperaChannel::Gx
-        } else if token.contains("beta") {
-            OperaChannel::Beta
-        } else {
-            OperaChannel::Stable
-        };
-        return Some((BrowserKind::Opera, BrowserChannel::Opera(channel)));
     }
 
     if token.contains("vivaldi") {

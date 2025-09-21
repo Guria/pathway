@@ -25,7 +25,7 @@ use unknown as platform;
 pub mod channels;
 
 pub use self::channels::BrowserChannel;
-use self::channels::{ChromiumChannel, FirefoxChannel, OperaChannel, SafariChannel};
+use self::channels::{ChromiumChannel, FirefoxChannel, SafariChannel};
 
 pub use platform::LaunchError;
 
@@ -323,11 +323,6 @@ pub fn default_channel_priority(channel: &BrowserChannel) -> u8 {
             FirefoxChannel::Beta => 2,
             FirefoxChannel::Dev => 3,
             FirefoxChannel::Nightly => 4,
-        },
-        BrowserChannel::Opera(ch) => match ch {
-            OperaChannel::Stable => 0,
-            OperaChannel::Beta => 1,
-            OperaChannel::Gx => 2,
         },
         BrowserChannel::Safari(ch) => match ch {
             SafariChannel::Stable => 0,

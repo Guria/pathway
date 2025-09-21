@@ -1,7 +1,5 @@
 use super::{BrowserInfo, LaunchOutcome, LaunchTarget, SystemDefaultBrowser};
-use crate::browser::channels::{
-    BrowserChannel, ChromiumChannel, FirefoxChannel, OperaChannel, SafariChannel,
-};
+use crate::browser::channels::{BrowserChannel, ChromiumChannel, FirefoxChannel, SafariChannel};
 use crate::browser::BrowserKind;
 use crate::filesystem::FileSystem;
 use std::path::PathBuf;
@@ -218,14 +216,6 @@ fn parse_bundle_id(bundle_id: &str) -> Option<(BrowserKind, BrowserChannel)> {
                 _ => ChromiumChannel::Stable,
             };
             BrowserChannel::Chromium(ch)
-        }
-        BrowserKind::Opera => {
-            let ch = match channel_str {
-                "beta" => OperaChannel::Beta,
-                "gx" => OperaChannel::Gx,
-                _ => OperaChannel::Stable,
-            };
-            BrowserChannel::Opera(ch)
         }
         _ => BrowserChannel::Single,
     };
