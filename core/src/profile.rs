@@ -1,9 +1,4 @@
 use crate::browser::channels::{BrowserChannel, ChromiumChannel};
-
-#[cfg(target_os = "macos")]
-use crate::browser::sources::{
-    detect_installation_source, InstallationSource, MacOsInstallationSource,
-};
 use crate::browser::{BrowserInfo, BrowserKind};
 use crate::filesystem::FileSystem;
 use serde::Serialize;
@@ -122,8 +117,8 @@ impl ProfileManager {
             BrowserKind::Firefox | BrowserKind::Waterfox => {
                 Self::discover_firefox_profiles_in_dir(browser, custom_base_dir)
             }
-            BrowserKind::Safari | BrowserKind::DuckDuckGo => {
-                // Safari and DuckDuckGo don't support multiple profiles
+            BrowserKind::Safari => {
+                // Safari doesn't support multiple profiles
                 let path = match custom_base_dir {
                     Some(dir) => dir.to_path_buf(),
                     None => Self::get_default_browser_dir(browser)?,
@@ -259,7 +254,7 @@ impl ProfileManager {
                     window_opts,
                 ));
             }
-            BrowserKind::Safari | BrowserKind::DuckDuckGo => {
+            BrowserKind::Safari => {
                 args.extend(Self::safari_profile_args(profile_opts, window_opts));
             }
             _ => {
@@ -865,37 +860,6 @@ impl ProfileManager {
                 }
             }
 
-            // DuckDuckGo (macOS only)
-            BrowserKind::DuckDuckGo => {
-                #[cfg(target_os = "macos")]
-                {
-                    let home = dirs_next::home_dir().ok_or_else(|| {
-                        ProfileError::InvalidDirectory(
-                            "Could not determine home directory".to_string(),
-                        )
-                    })?;
-
-                    // Detect installation source on-demand to determine the correct profile path
-                    let source = detect_installation_source(browser);
-                    match source {
-                        InstallationSource::MacOs(MacOsInstallationSource::AppStore) => {
-                            // App Store DuckDuckGo uses sandboxed container path
-                            Ok(home.join("Library/Containers/com.duckduckgo.mobile.ios/Data/Library/Application Support"))
-                        }
-                        _ => {
-                            // System installation uses standard application support
-                            Ok(home.join("Library/Application Support/DuckDuckGo"))
-                        }
-                    }
-                }
-                #[cfg(not(target_os = "macos"))]
-                {
-                    Err(ProfileError::UnsupportedBrowser(
-                        "DuckDuckGo is only supported on macOS".to_string(),
-                    ))
-                }
-            }
-
             // Tor Browser - has its own directory structure
             BrowserKind::TorBrowser => {
                 let home = dirs_next::home_dir().ok_or_else(|| {
@@ -1219,46 +1183,32 @@ pub fn validate_profile_options(
     let mut warnings = Vec::new();
 
     match browser.kind {
-        BrowserKind::Safari | BrowserKind::DuckDuckGo => {
-            let browser_name = if browser.kind == BrowserKind::Safari {
-                "Safari"
-            } else {
-                "DuckDuckGo"
-            };
-
+        BrowserKind::Safari => {
             match &profile_opts.profile_type {
                 ProfileType::Named(_) => {
-                    warnings.push(format!("{} does not support named profiles", browser_name));
+                    warnings.push("Safari does not support named profiles".to_string());
                 }
                 ProfileType::CustomDirectory(_) => {
-                    warnings.push(format!(
-                        "{} does not support custom user data directories",
-                        browser_name
-                    ));
+                    warnings
+                        .push("Safari does not support custom user data directories".to_string());
                 }
                 ProfileType::Temporary(_) => {
-                    warnings.push(format!(
-                        "{} does not support temporary profiles",
-                        browser_name
-                    ));
+                    warnings.push("Safari does not support temporary profiles".to_string());
                 }
                 ProfileType::Guest => {
-                    warnings.push(format!("{} does not support guest mode", browser_name));
+                    warnings.push("Safari does not support guest mode".to_string());
                 }
                 ProfileType::Default => {}
             }
 
             if window_opts.incognito {
-                warnings.push(format!(
-                    "{} incognito mode requires manual activation (not supported via command line)",
-                    browser_name
-                ));
+                warnings.push(
+                    "Safari incognito mode requires manual activation (not supported via command line)"
+                        .to_string(),
+                );
             }
             if window_opts.kiosk {
-                warnings.push(format!(
-                    "{} does not support kiosk mode via command line",
-                    browser_name
-                ));
+                warnings.push("Safari does not support kiosk mode via command line".to_string());
             }
         }
 

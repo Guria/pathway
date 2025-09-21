@@ -1,6 +1,5 @@
 use super::{BrowserInfo, BrowserKind};
 use crate::browser::channels::{BrowserChannel, ChromiumChannel, FirefoxChannel, OperaChannel};
-use crate::browser::sources::{InstallationSource, LinuxInstallationSource};
 use crate::filesystem::FileSystem;
 use std::collections::HashSet;
 use std::env;
@@ -254,29 +253,9 @@ fn parse_exec_path(exec: &str) -> Option<PathBuf> {
     Some(PathBuf::from(first))
 }
 
-fn infer_source(path: &Path) -> InstallationSource {
-    let path_str = path.to_string_lossy();
-    if path_str.contains("/flatpak/") {
-        InstallationSource::Linux(LinuxInstallationSource::Flatpak)
-    } else if path_str.contains("/snap/") {
-        InstallationSource::Linux(LinuxInstallationSource::Snap)
-    } else {
-        InstallationSource::Linux(LinuxInstallationSource::System)
-    }
-}
-
 fn parse_desktop_file_name(path_str: &str) -> Option<(BrowserKind, BrowserChannel)> {
     let file_name = Path::new(path_str).file_name()?.to_str()?.to_lowercase();
     classify_browser_from_token(&file_name)
-}
-
-/// On-demand installation source detection for Linux browsers
-pub fn detect_source_for_browser(browser: &crate::browser::BrowserInfo) -> InstallationSource {
-    use std::path::Path;
-
-    // Re-use the existing infer_source logic with the unique_id (desktop file path)
-    let path = Path::new(&browser.unique_id);
-    infer_source(path)
 }
 
 fn prepare_launch_command(
@@ -520,10 +499,6 @@ fn classify_browser_from_token(token: &str) -> Option<(BrowserKind, BrowserChann
 
     if token.contains("waterfox") {
         return Some((BrowserKind::Waterfox, BrowserChannel::Single));
-    }
-
-    if token.contains("duckduckgo") {
-        return Some((BrowserKind::DuckDuckGo, BrowserChannel::Single));
     }
 
     if token.contains("zen") || token.contains("arc") {

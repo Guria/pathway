@@ -1,6 +1,5 @@
 use super::{BrowserInfo, BrowserKind};
 use crate::browser::channels::{BrowserChannel, ChromiumChannel, FirefoxChannel, OperaChannel};
-use crate::browser::sources::{InstallationSource, WindowsInstallationSource};
 use crate::filesystem::FileSystem;
 use std::path::PathBuf;
 use winreg::enums::*;
@@ -270,13 +269,6 @@ fn parse_client_name(
     };
 
     Some((kind, channel))
-}
-
-/// On-demand installation source detection for Windows browsers
-pub fn detect_source_for_browser(_browser: &crate::browser::BrowserInfo) -> InstallationSource {
-    // TODO: Implement detailed Windows source detection (system, chocolatey, scoop, winget)
-    // For now, default to system installation
-    InstallationSource::Windows(WindowsInstallationSource::System)
 }
 
 fn default_prog_id() -> Option<String> {

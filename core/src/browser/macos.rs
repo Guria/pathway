@@ -2,7 +2,6 @@ use super::{BrowserInfo, LaunchOutcome, LaunchTarget, SystemDefaultBrowser};
 use crate::browser::channels::{
     BrowserChannel, ChromiumChannel, FirefoxChannel, OperaChannel, SafariChannel,
 };
-use crate::browser::sources::{InstallationSource, MacOsInstallationSource};
 use crate::browser::BrowserKind;
 use crate::filesystem::FileSystem;
 use std::path::PathBuf;
@@ -137,33 +136,6 @@ fn get_app_path_from_bundle_id(bundle_id: &str) -> Option<PathBuf> {
     }
 }
 
-fn is_app_store_installation(app_path: &std::path::Path) -> bool {
-    // Check for Mac App Store receipt
-    let receipt_path = app_path.join("Contents/_MASReceipt/receipt");
-    if receipt_path.exists() {
-        return true;
-    }
-
-    // Alternative check: look for App Store-specific metadata
-    let info_plist_path = app_path.join("Contents/Info.plist");
-    if info_plist_path.exists() {
-        // Could check for specific App Store entitlements or signatures here
-        // For now, the receipt check is the most reliable method
-    }
-
-    false
-}
-
-fn is_homebrew_installation(_bundle_id: &str, _app_path: &std::path::Path) -> bool {
-    // For performance, we're disabling Homebrew detection for now
-    // The ~8 second delay from running `brew list --cask` for each browser is unacceptable
-    // TODO: Implement a faster detection method:
-    // - Cache brew output globally and reuse
-    // - Use filesystem checks for common Homebrew patterns
-    // - Make it opt-in via a --detailed flag
-    false
-}
-
 fn parse_bundle_id(bundle_id: &str) -> Option<(BrowserKind, BrowserChannel)> {
     let lower_id = bundle_id.to_lowercase();
 
@@ -219,11 +191,6 @@ fn parse_bundle_id(bundle_id: &str) -> Option<(BrowserKind, BrowserChannel)> {
     // Helium
     if lower_id == "net.imput.helium" {
         return Some((BrowserKind::Helium, BrowserChannel::Single));
-    }
-
-    // DuckDuckGo
-    if lower_id == "com.duckduckgo.mobile.ios" {
-        return Some((BrowserKind::DuckDuckGo, BrowserChannel::Single));
     }
 
     // Chromium-based browsers
@@ -429,23 +396,6 @@ pub fn launch_with_profile(
                 command: cmd,
             })
         }
-    }
-}
-
-/// On-demand installation source detection for macOS browsers
-pub fn detect_source_for_browser(browser: &crate::browser::BrowserInfo) -> InstallationSource {
-    // Get the app path from the bundle ID
-    if let Some(app_path) = get_app_path_from_bundle_id(&browser.unique_id) {
-        if is_app_store_installation(&app_path) {
-            InstallationSource::MacOs(MacOsInstallationSource::AppStore)
-        } else if is_homebrew_installation(&browser.unique_id, &app_path) {
-            InstallationSource::MacOs(MacOsInstallationSource::Homebrew)
-        } else {
-            InstallationSource::MacOs(MacOsInstallationSource::System)
-        }
-    } else {
-        // Fallback if we can't find the app path
-        InstallationSource::MacOs(MacOsInstallationSource::System)
     }
 }
 

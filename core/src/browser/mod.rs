@@ -23,7 +23,6 @@ mod unknown;
 use unknown as platform;
 
 pub mod channels;
-pub mod sources;
 
 pub use self::channels::BrowserChannel;
 use self::channels::{ChromiumChannel, FirefoxChannel, OperaChannel, SafariChannel};
@@ -45,7 +44,6 @@ pub enum BrowserKind {
     TorBrowser,
     Chromium,
     Waterfox,
-    DuckDuckGo,
     Other,
 }
 
@@ -64,13 +62,12 @@ impl BrowserKind {
             BrowserKind::TorBrowser => "tor",
             BrowserKind::Chromium => "chromium",
             BrowserKind::Waterfox => "waterfox",
-            BrowserKind::DuckDuckGo => "duckduckgo",
             BrowserKind::Other => "browser",
         }
     }
 }
 
-// Basic browser info without installation source (used for inventory operations)
+// Basic browser info (used for inventory operations)
 #[derive(Debug, Clone, Serialize)]
 pub struct BasicBrowserInfo {
     pub kind: BrowserKind,
@@ -85,7 +82,7 @@ pub struct BasicBrowserInfo {
     pub exec_command: Option<String>,
 }
 
-// Full browser info (installation source removed for performance)
+// Full browser info used at runtime
 #[derive(Debug, Clone, Serialize)]
 pub struct BrowserInfo {
     pub kind: BrowserKind,
