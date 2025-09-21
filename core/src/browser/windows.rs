@@ -188,6 +188,7 @@ fn create_browser_info(
         executable_path,
         version,
         unique_id: reg_path,
+        exec_command: Some(command_path),
     })
 }
 

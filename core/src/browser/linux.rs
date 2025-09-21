@@ -45,26 +45,29 @@ pub fn launch_with_profile(
 
     match target {
         LaunchTarget::Browser(info) => {
-            let exec = info
-                .launch_path()
-                .ok_or_else(|| LaunchError::MissingExecutable(info.display_name.clone()))?;
+            let (program, resolved_args, urls_consumed) = prepare_launch_command(info, urls)?;
 
-            let mut command = Command::new(exec);
+            let mut command = Command::new(&program);
 
-            let has_profile_args =
-                if let (Some(profile_opts), Some(window_opts)) = (profile_opts, window_opts) {
-                    let profile_args = crate::profile::ProfileManager::generate_profile_args(
-                        info,
-                        profile_opts,
-                        window_opts,
-                    );
-                    command.args(&profile_args);
-                    !profile_args.is_empty()
-                } else {
-                    false
-                };
+            let mut profile_args = Vec::new();
+            let mut has_profile_args = false;
+            if let (Some(profile_opts), Some(window_opts)) = (profile_opts, window_opts) {
+                profile_args = crate::profile::ProfileManager::generate_profile_args(
+                    info,
+                    profile_opts,
+                    window_opts,
+                );
+                has_profile_args = !profile_args.is_empty();
+            }
 
-            command.args(urls);
+            command.args(&resolved_args);
+            if has_profile_args {
+                command.args(&profile_args);
+            }
+            if !urls_consumed {
+                command.args(urls);
+            }
+
             command.stdin(Stdio::null());
             command.stdout(Stdio::null());
             command.stderr(Stdio::null());
@@ -79,13 +82,13 @@ pub fn launch_with_profile(
             } else {
                 "Launching browser"
             };
-            debug!(program = %exec.display(), args = ?all_args, "{}", log_message);
+            debug!(program = %program.display(), args = ?all_args, "{}", log_message);
             command.spawn()?;
 
             let cmd = LaunchCommand {
-                program: exec.to_path_buf(),
+                program: program.clone(),
                 args: all_args.clone(),
-                display: format!("{} {}", exec.display(), all_args.join(" ")),
+                display: format!("{} {}", program.display(), all_args.join(" ")),
                 is_system_default: false,
             };
 
@@ -229,7 +232,8 @@ fn create_browser_info(path: &Path, content: &str) -> Option<BrowserInfo> {
         .map(|s| s.to_string())
         .unwrap_or_else(|| kind.canonical_name().to_string());
 
-    let executable_path = get_desktop_entry_value(content, "Exec").and_then(parse_exec_path)?;
+    let exec_value = get_desktop_entry_value(content, "Exec")?;
+    let executable_path = parse_exec_path(exec_value)?;
 
     let version = None; // Version detection is out of scope.
 
@@ -240,12 +244,14 @@ fn create_browser_info(path: &Path, content: &str) -> Option<BrowserInfo> {
         executable_path,
         version,
         unique_id: path.to_str()?.to_string(),
+        exec_command: Some(exec_value.to_string()),
     })
 }
 
 fn parse_exec_path(exec: &str) -> Option<PathBuf> {
-    let path_str = exec.split(' ').next()?;
-    Some(PathBuf::from(path_str))
+    let parts = shell_words::split(exec).ok()?;
+    let first = parts.first()?.clone();
+    Some(PathBuf::from(first))
 }
 
 fn infer_source(path: &Path) -> InstallationSource {
@@ -271,6 +277,138 @@ pub fn detect_source_for_browser(browser: &crate::browser::BrowserInfo) -> Insta
     // Re-use the existing infer_source logic with the unique_id (desktop file path)
     let path = Path::new(&browser.unique_id);
     infer_source(path)
+}
+
+fn prepare_launch_command(
+    info: &BrowserInfo,
+    urls: &[String],
+) -> Result<(PathBuf, Vec<String>, bool), LaunchError> {
+    if let Some(exec_line) = info.exec_command.as_deref() {
+        if let Some(parts) = build_command_from_exec(exec_line, info, urls) {
+            return Ok(parts);
+        }
+    }
+
+    let exec = info
+        .launch_path()
+        .ok_or_else(|| LaunchError::MissingExecutable(info.display_name.clone()))?;
+
+    Ok((exec.to_path_buf(), Vec::new(), false))
+}
+
+fn build_command_from_exec(
+    exec_line: &str,
+    info: &BrowserInfo,
+    urls: &[String],
+) -> Option<(PathBuf, Vec<String>, bool)> {
+    let tokens = shell_words::split(exec_line).ok()?;
+    let mut iter = tokens.into_iter();
+    let program_token = iter.next()?;
+
+    let desktop_path = {
+        let path = Path::new(&info.unique_id);
+        if info.unique_id.is_empty() {
+            None
+        } else {
+            Some(path)
+        }
+    };
+
+    let mut args = Vec::new();
+    let mut consumed_urls = false;
+
+    for token in iter {
+        let (mut expanded, consumed) = expand_exec_token(&token, info, desktop_path, urls);
+        if consumed {
+            consumed_urls = true;
+        }
+        args.append(&mut expanded);
+    }
+
+    Some((PathBuf::from(program_token), args, consumed_urls))
+}
+
+fn expand_exec_token(
+    token: &str,
+    info: &BrowserInfo,
+    desktop_path: Option<&Path>,
+    urls: &[String],
+) -> (Vec<String>, bool) {
+    match token {
+        "%u" | "%f" => {
+            if let Some(first) = urls.first() {
+                (vec![first.clone()], true)
+            } else {
+                (Vec::new(), false)
+            }
+        }
+        "%U" | "%F" => {
+            if urls.is_empty() {
+                (Vec::new(), false)
+            } else {
+                (urls.to_vec(), true)
+            }
+        }
+        "%c" => (vec![info.display_name.clone()], false),
+        "%k" => {
+            if let Some(path) = desktop_path {
+                (vec![path.to_string_lossy().to_string()], false)
+            } else {
+                (Vec::new(), false)
+            }
+        }
+        "%i" => (Vec::new(), false),
+        "%%" => (vec!["%".to_string()], false),
+        "%d" | "%D" | "%n" | "%N" | "%m" => (Vec::new(), false),
+        _ => {
+            let mut consumed = false;
+            let mut expanded = token.to_string();
+
+            if expanded.contains("%%") {
+                expanded = expanded.replace("%%", "%");
+            }
+
+            if expanded.contains("%c") {
+                expanded = expanded.replace("%c", &info.display_name);
+            }
+
+            if expanded.contains("%k") {
+                if let Some(path) = desktop_path {
+                    expanded = expanded.replace("%k", &path.to_string_lossy());
+                } else {
+                    expanded = expanded.replace("%k", "");
+                }
+            }
+
+            if expanded.contains("%u") || expanded.contains("%f") {
+                if let Some(first) = urls.first() {
+                    expanded = expanded.replace("%u", first);
+                    expanded = expanded.replace("%f", first);
+                    consumed = true;
+                } else {
+                    expanded = expanded.replace("%u", "");
+                    expanded = expanded.replace("%f", "");
+                }
+            }
+
+            if expanded.contains("%U") || expanded.contains("%F") {
+                if !urls.is_empty() {
+                    if expanded == "%U" || expanded == "%F" {
+                        return (urls.to_vec(), true);
+                    }
+
+                    expanded = expanded.replace("%U", &urls[0]);
+                    expanded = expanded.replace("%F", &urls[0]);
+                    consumed = true;
+                } else {
+                    expanded = expanded.replace("%U", "");
+                    expanded = expanded.replace("%F", "");
+                }
+            }
+
+            (vec![expanded], consumed)
+        }
+    }
 }
 
 fn infer_kind_from_entry(path: &Path, content: &str) -> Option<(BrowserKind, BrowserChannel)> {
@@ -303,6 +441,10 @@ fn infer_kind_from_entry(path: &Path, content: &str) -> Option<(BrowserKind, Bro
 }
 
 fn classify_browser_from_token(token: &str) -> Option<(BrowserKind, BrowserChannel)> {
+    if token.contains("helium") {
+        return Some((BrowserKind::Helium, BrowserChannel::Single));
+    }
+
     if token.contains("google-chrome") || token.contains("chrome") {
         let channel = if token.contains("canary") {
             ChromiumChannel::Canary

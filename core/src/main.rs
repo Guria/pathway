@@ -370,7 +370,7 @@ fn main() {
             handle_launch_command(&inventory, params);
         }
         Commands::Browser { action } => {
-            handle_browser_command(&inventory, action, args.format);
+            handle_browser_command(&inventory, action, args.format, args.verbose);
         }
         Commands::Profile {
             browser,
@@ -884,6 +884,7 @@ fn execute_launch_and_respond(
 /// - `inventory`: the detected browser inventory to query.
 /// - `action`: the browser action to perform (`List` or `Check`).
 /// - `format`: output format (`Human` or `Json`).
+/// - `verbose`: toggles extra human-readable diagnostics (each entry includes its unique identifier).
 ///
 /// # Examples
 ///
@@ -892,14 +893,15 @@ fn execute_launch_and_respond(
 /// # use pathway::BrowserInventory;
 /// // Assume `inventory` is populated by detection logic.
 /// // List browsers in human form:
-/// // handle_browser_command(&inventory, BrowserAction::List, OutputFormat::Human);
+/// // handle_browser_command(&inventory, BrowserAction::List, OutputFormat::Human, true);
 /// // Check a browser and print JSON:
-/// // handle_browser_command(&inventory, BrowserAction::Check { browser: "chrome".into(), channel: None }, OutputFormat::Json);
+/// // handle_browser_command(&inventory, BrowserAction::Check { browser: "chrome".into(), channel: None }, OutputFormat::Json, false);
 /// ```
 fn handle_browser_command(
     inventory: &BrowserInventory,
     action: BrowserAction,
     format: OutputFormat,
+    verbose: bool,
 ) {
     match action {
         BrowserAction::List => match format {
@@ -912,7 +914,14 @@ fn handle_browser_command(
                         let channel_name = browser.channel.canonical_name();
                         let alias = browser.alias();
 
-                        eprintln!("{} ({}) - {}", alias, channel_name, browser.display_name);
+                        if verbose {
+                            eprintln!(
+                                "{} ({}) - {} [{}]",
+                                alias, channel_name, browser.display_name, browser.unique_id
+                            );
+                        } else {
+                            eprintln!("{} ({}) - {}", alias, channel_name, browser.display_name);
+                        }
                     }
                 }
                 eprintln!("System default: {}", inventory.system_default.display_name);
@@ -955,6 +964,9 @@ fn handle_browser_command(
                             "  Installation Source: {}",
                             detected_source.canonical_name()
                         );
+                        if let Some(exec_command) = &info.exec_command {
+                            eprintln!("  Launch Command: {}", exec_command);
+                        }
                         eprintln!("  Executable: {}", info.executable_path.display());
                         eprintln!("  Unique ID: {}", info.unique_id);
 
@@ -993,6 +1005,7 @@ fn handle_browser_command(
                             installation_source: String,
                             display_name: String,
                             executable_path: String,
+                            exec_command: Option<String>,
                             unique_id: String,
                             profile_directory: Option<String>,
                         }
@@ -1008,6 +1021,7 @@ fn handle_browser_command(
                             installation_source: detected_source.canonical_name().to_string(),
                             display_name: info.display_name.clone(),
                             executable_path: info.executable_path.to_string_lossy().to_string(),
+                            exec_command: info.exec_command.clone(),
                             unique_id: info.unique_id.clone(),
                             profile_directory: profile_dir,
                         };
@@ -1067,6 +1081,9 @@ fn handle_browser_command(
                         let alias = info.alias();
                         eprintln!("Browser '{}' is available.", alias);
                         eprintln!("  Display Name: {}", info.display_name);
+                        if let Some(exec_command) = &info.exec_command {
+                            eprintln!("  Launch Command: {}", exec_command);
+                        }
                         eprintln!("  Executable: {}", info.executable_path.display());
                         eprintln!("  Unique ID: {}", info.unique_id);
                     } else {
@@ -1737,6 +1754,7 @@ mod tests {
             executable_path: PathBuf::from(format!("/fake/bin/{}", display.replace(' ', ""))),
             version: Some("1.2.3".into()),
             unique_id: format!("chrome-{}", channel.canonical_name()),
+            exec_command: None,
         }
     }
 
@@ -1748,6 +1766,7 @@ mod tests {
             executable_path: PathBuf::from(format!("/fake/bin/{}", display.replace(' ', ""))),
             version: Some("1.2.3".into()),
             unique_id: format!("firefox-{}", channel.canonical_name()),
+            exec_command: None,
         }
     }
 
@@ -1760,6 +1779,7 @@ mod tests {
             executable_path: PathBuf::from("/Applications/Safari.app/Contents/MacOS/Safari"),
             version: Some("17.0".into()),
             unique_id: "com.apple.Safari".into(),
+            exec_command: None,
         }
     }
 
@@ -1775,6 +1795,7 @@ mod tests {
             )),
             version: Some("1.2.3".into()),
             unique_id: "edge-stable".into(),
+            exec_command: None,
         }
     }
 

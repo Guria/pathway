@@ -1,4 +1,5 @@
 use serde::Serialize;
+use std::collections::HashSet;
 use std::path::PathBuf;
 
 #[cfg(target_os = "macos")]
@@ -80,6 +81,8 @@ pub struct BasicBrowserInfo {
     // A unique, stable identifier for this specific installation.
     // e.g., macOS bundle ID, Windows registry path, or Linux .desktop file path.
     pub unique_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exec_command: Option<String>,
 }
 
 // Full browser info (installation source removed for performance)
@@ -93,6 +96,8 @@ pub struct BrowserInfo {
     // A unique, stable identifier for this specific installation.
     // e.g., macOS bundle ID, Windows registry path, or Linux .desktop file path.
     pub unique_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exec_command: Option<String>,
 }
 
 impl From<BrowserInfo> for BasicBrowserInfo {
@@ -104,6 +109,7 @@ impl From<BrowserInfo> for BasicBrowserInfo {
             executable_path: info.executable_path,
             version: info.version,
             unique_id: info.unique_id,
+            exec_command: info.exec_command,
         }
     }
 }
@@ -198,8 +204,8 @@ pub struct BrowserInventory {
 }
 
 pub fn detect_inventory_with_fs<F: crate::filesystem::FileSystem>(fs: &F) -> BrowserInventory {
-    let browsers = platform::detect_browsers(fs);
-    // TODO: deduplicate and sort
+    let browsers = dedupe_browsers(platform::detect_browsers(fs));
+    // TODO: sort
     BrowserInventory {
         browsers,
         system_default: platform::system_default_browser_with_fs(fs)
@@ -279,6 +285,31 @@ pub fn available_tokens(browsers: &[BrowserInfo]) -> Vec<String> {
     tokens.sort();
     tokens.dedup();
     tokens
+}
+
+fn dedupe_browsers(browsers: Vec<BrowserInfo>) -> Vec<BrowserInfo> {
+    let mut seen = HashSet::new();
+    let mut unique = Vec::new();
+
+    for browser in browsers {
+        let signature = browser
+            .exec_command
+            .clone()
+            .unwrap_or_else(|| browser.executable_path.to_string_lossy().to_string());
+
+        let key = format!(
+            "{}|{}|{}",
+            browser.kind.canonical_name(),
+            browser.channel.canonical_name(),
+            signature
+        );
+
+        if seen.insert(key) {
+            unique.push(browser);
+        }
+    }
+
+    unique
 }
 
 pub fn default_channel_priority(channel: &BrowserChannel) -> u8 {

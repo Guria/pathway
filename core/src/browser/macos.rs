@@ -113,6 +113,7 @@ fn create_browser_info<F: FileSystem>(bundle_id: &str, _fs: &F) -> Option<Browse
         executable_path,
         version,
         unique_id: bundle_id.to_string(),
+        exec_command: None,
     })
 }
 
