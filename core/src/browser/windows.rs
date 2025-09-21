@@ -6,10 +6,9 @@ use winreg::enums::*;
 use winreg::RegKey;
 
 use super::{LaunchCommand, LaunchOutcome, LaunchTarget, SystemDefaultBrowser};
-use std::collections::HashSet;
 use std::process::{Command, Stdio};
 use thiserror::Error;
-use tracing::{debug, warn};
+use tracing::debug;
 
 #[derive(Debug, Error)]
 pub enum LaunchError {
@@ -137,69 +136,21 @@ pub fn system_default_browser_with_fs<F: FileSystem>(_fs: &F) -> Option<SystemDe
 
 pub fn detect_browsers<F: FileSystem>(_fs: &F) -> Vec<BrowserInfo> {
     let mut browsers = Vec::new();
-    let mut seen = HashSet::new();
+    let mut seen_paths = std::collections::HashSet::new();
     let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
 
     let search_path = "SOFTWARE\\Clients\\StartMenuInternet";
-    let registries = [(&hkcu, "HKCU"), (&hklm, "HKLM")];
 
-    for (key, hive_name) in registries {
-        match key.open_subkey(search_path) {
-            Ok(internet_clients) => {
-                for entry in internet_clients.enum_keys() {
-                    match entry {
-                        Ok(client_name) => {
-                            match create_browser_info(key, search_path, &client_name) {
-                                Some(browser_info) => {
-                                    let stable_id = format!(
-                                        "{}|{}",
-                                        client_name.to_ascii_lowercase(),
-                                        browser_info
-                                            .executable_path
-                                            .to_string_lossy()
-                                            .to_ascii_lowercase()
-                                    );
-
-                                    if seen.insert(stable_id) {
-                                        browsers.push(browser_info);
-                                    } else {
-                                        debug!(
-                                            hive = hive_name,
-                                            search_path = search_path,
-                                            client = %client_name,
-                                            "Duplicate browser entry skipped"
-                                        );
-                                    }
-                                }
-                                None => {
-                                    warn!(
-                                        hive = hive_name,
-                                        search_path = search_path,
-                                        client = %client_name,
-                                        "Failed to create BrowserInfo from registry entry"
-                                    );
-                                }
-                            }
-                        }
-                        Err(err) => {
-                            warn!(
-                                hive = hive_name,
-                                search_path = search_path,
-                                error = ?err,
-                                "Failed to enumerate registry subkey"
-                            );
-                        }
+    for key in [&hklm, &hkcu] {
+        if let Ok(internet_clients) = key.open_subkey(search_path) {
+            for client_name in internet_clients.enum_keys().filter_map(Result::ok) {
+                if let Some(browser_info) = create_browser_info(key, search_path, &client_name) {
+                    // Deduplicate by executable path
+                    if seen_paths.insert(browser_info.executable_path.clone()) {
+                        browsers.push(browser_info);
                     }
                 }
-            }
-            Err(err) => {
-                warn!(
-                    hive = hive_name,
-                    search_path = search_path,
-                    error = ?err,
-                    "Failed to open registry path"
-                );
             }
         }
     }
@@ -241,13 +192,34 @@ fn create_browser_info(
 }
 
 fn parse_command_path(command: &str) -> Option<PathBuf> {
-    // The command might be quoted and contain arguments.
-    let path_str = if command.starts_with('"') {
-        command.split('"').nth(1)?
+    // Trim whitespace from the command
+    let trimmed = command.trim();
+
+    // If the command starts with a quote, extract the content between the first pair of quotes
+    if trimmed.starts_with('"') {
+        let parts: Vec<&str> = trimmed.split('"').collect();
+        if parts.len() >= 3 {
+            return Some(PathBuf::from(parts[1]));
+        }
+    }
+
+    // Otherwise, perform a case-insensitive search for the first occurrence of ".exe"
+    let lower_command = trimmed.to_lowercase();
+    if let Some(exe_pos) = lower_command.find(".exe") {
+        // Find the end of ".exe" (4 characters: . e x e)
+        let exe_end = exe_pos + 4;
+        let path_str = &trimmed[..exe_end];
+        return Some(PathBuf::from(path_str));
+    }
+
+    // If no ".exe" is found, fall back to splitting on the first space
+    if let Some(space_pos) = trimmed.find(' ') {
+        let path_str = &trimmed[..space_pos];
+        Some(PathBuf::from(path_str))
     } else {
-        command.split(' ').next()?
-    };
-    Some(PathBuf::from(path_str))
+        // No space found, use the whole string
+        Some(PathBuf::from(trimmed))
+    }
 }
 
 fn parse_client_name(
@@ -294,8 +266,10 @@ fn parse_client_name(
     } else if name.contains("brave") || client.contains("brave") {
         let channel = if name.contains("beta") || client.contains("beta") {
             ChromiumChannel::Beta
-        } else if name.contains("dev") || name.contains("nightly") || client.contains("nightly") {
+        } else if name.contains("dev") || client.contains("dev") {
             ChromiumChannel::Dev
+        } else if name.contains("nightly") || client.contains("nightly") {
+            ChromiumChannel::Canary
         } else {
             ChromiumChannel::Stable
         };
@@ -395,6 +369,7 @@ fn fallback_system_default(prog_id: &str) -> Option<SystemDefaultBrowser> {
 fn command_for_prog_id(prog_id: &str) -> Option<String> {
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
     let hkcr = RegKey::predef(HKEY_CLASSES_ROOT);
+    let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
 
     let cursors = [
         hkcu.open_subkey(format!(
@@ -402,6 +377,10 @@ fn command_for_prog_id(prog_id: &str) -> Option<String> {
             prog_id
         )),
         hkcr.open_subkey(format!("{}\\shell\\open\\command", prog_id)),
+        hklm.open_subkey(format!(
+            "Software\\Classes\\{}\\shell\\open\\command",
+            prog_id
+        )),
     ];
 
     for cursor in cursors.into_iter().flatten() {
@@ -418,10 +397,12 @@ fn command_for_prog_id(prog_id: &str) -> Option<String> {
 fn application_display_name(prog_id: &str) -> Option<String> {
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
     let hkcr = RegKey::predef(HKEY_CLASSES_ROOT);
+    let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
 
     let candidates = [
         hkcu.open_subkey(format!("Software\\Classes\\{}", prog_id)),
         hkcr.open_subkey(prog_id),
+        hklm.open_subkey(format!("Software\\Classes\\{}", prog_id)),
     ];
 
     for key in candidates.into_iter().flatten() {

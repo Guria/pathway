@@ -8,8 +8,6 @@ use tracing::debug;
 
 #[derive(Debug, Error)]
 pub enum LaunchError {
-    #[error("Browser executable missing: {0}")]
-    MissingExecutable(String),
     #[error("No URLs provided to launch")]
     NoUrls,
     #[error("Unable to launch system default browser on this platform")]
@@ -73,7 +71,6 @@ pub fn launch(target: LaunchTarget<'_>, urls: &[String]) -> Result<LaunchOutcome
 ///
 /// Returns a `LaunchError` when:
 /// - `LaunchError::NoUrls` if `urls` is empty.
-/// - `LaunchError::MissingExecutable` if the chosen browser has no known executable path.
 /// - `LaunchError::Unsupported` if `target` is `LaunchTarget::SystemDefault`.
 /// - `LaunchError::Spawn` if spawning the browser process fails (propagated from `std::io::Error`).
 ///
@@ -101,7 +98,7 @@ pub fn launch_with_profile(
         LaunchTarget::Browser(info) => {
             let exec = info.launch_path();
 
-            let mut command = Command::new(exec);
+            let mut command = Command::new(&exec);
             command.args(urls);
             command.stdin(Stdio::null());
             command.stdout(Stdio::null());
@@ -110,7 +107,7 @@ pub fn launch_with_profile(
             command.spawn()?;
 
             let cmd = LaunchCommand {
-                program: exec.to_path_buf(),
+                program: exec.clone(),
                 args: urls.to_vec(),
                 display: format!("{} {}", exec.display(), urls.join(" ")),
                 is_system_default: false,

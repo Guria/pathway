@@ -50,7 +50,7 @@ fn get_https_handlers() -> Vec<String> {
         if handlers_ref.is_null() {
             return Vec::new();
         }
-        let handlers: CFArray<CFString> = CFArray::wrap_under_get_rule(handlers_ref as *const _);
+        let handlers: CFArray<CFString> = CFArray::wrap_under_create_rule(handlers_ref as *const _);
         handlers.iter().map(|s| s.to_string()).collect()
     }
 }
