@@ -649,7 +649,7 @@ impl ProfileManager {
                 BrowserKind::Vivaldi => "Vivaldi",
                 BrowserKind::Arc => "Arc",
                 BrowserKind::Helium => "net.imput.helium",
-                BrowserKind::Opera => "com.operasoftware.Opera",
+                BrowserKind::Opera => "com.operasoftware.Opera", // TODO: Handle OperaChannel variants (Beta, GX)
                 BrowserKind::Chromium => "Chromium",
                 _ => {
                     return Err(ProfileError::UnsupportedBrowser(format!(
@@ -671,7 +671,7 @@ impl ProfileManager {
                 BrowserKind::Vivaldi => "vivaldi",
                 BrowserKind::Arc => "arc",
                 BrowserKind::Helium => "helium",
-                BrowserKind::Opera => "opera",
+                BrowserKind::Opera => "opera", // TODO: Handle OperaChannel variants (Beta, GX)
                 BrowserKind::Chromium => "chromium",
                 _ => {
                     return Err(ProfileError::UnsupportedBrowser(format!(
