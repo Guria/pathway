@@ -1,3 +1,9 @@
+use crate::browser::channels::{BrowserChannel, ChromiumChannel};
+
+#[cfg(target_os = "macos")]
+use crate::browser::sources::{
+    detect_installation_source, InstallationSource, MacOsInstallationSource,
+};
 use crate::browser::{BrowserInfo, BrowserKind};
 use crate::filesystem::FileSystem;
 use serde::Serialize;
@@ -116,11 +122,11 @@ impl ProfileManager {
             BrowserKind::Firefox | BrowserKind::Waterfox => {
                 Self::discover_firefox_profiles_in_dir(browser, custom_base_dir)
             }
-            BrowserKind::Safari => {
-                // Safari doesn't support profiles
+            BrowserKind::Safari | BrowserKind::DuckDuckGo => {
+                // Safari and DuckDuckGo don't support multiple profiles
                 let path = match custom_base_dir {
                     Some(dir) => dir.to_path_buf(),
-                    None => Self::get_default_browser_dir(browser.kind)?,
+                    None => Self::get_default_browser_dir(browser)?,
                 };
                 Ok(vec![ProfileInfo {
                     name: "default".to_string(),
@@ -135,7 +141,7 @@ impl ProfileManager {
                 // Other browsers - assume single profile
                 let path = match custom_base_dir {
                     Some(dir) => dir.to_path_buf(),
-                    None => Self::get_default_browser_dir(browser.kind)?,
+                    None => Self::get_default_browser_dir(browser)?,
                 };
                 Ok(vec![ProfileInfo {
                     name: "default".to_string(),
@@ -253,7 +259,7 @@ impl ProfileManager {
                     window_opts,
                 ));
             }
-            BrowserKind::Safari => {
+            BrowserKind::Safari | BrowserKind::DuckDuckGo => {
                 args.extend(Self::safari_profile_args(profile_opts, window_opts));
             }
             _ => {
@@ -395,7 +401,7 @@ impl ProfileManager {
     ) -> Result<Vec<ProfileInfo>, ProfileError> {
         let base_dir = match custom_base_dir {
             Some(custom_dir) => custom_dir.to_path_buf(),
-            None => Self::get_chromium_base_dir(browser.kind)?,
+            None => Self::get_chromium_base_dir(browser)?,
         };
         let local_state_path = base_dir.join("Local State");
 
@@ -621,80 +627,145 @@ impl ProfileManager {
     /// // let dir = ProfileManager::get_chromium_base_dir(BrowserKind::Chrome).expect("expected to resolve base dir");
     /// // assert!(dir.is_absolute());
     /// ```
-    fn get_chromium_base_dir(browser_kind: BrowserKind) -> Result<PathBuf, ProfileError> {
+    fn get_chromium_base_dir(browser: &BrowserInfo) -> Result<PathBuf, ProfileError> {
         let home = dirs_next::home_dir().ok_or_else(|| {
             ProfileError::InvalidDirectory("Could not determine home directory".to_string())
         })?;
 
-        match browser_kind {
-            BrowserKind::Chrome => {
-                #[cfg(target_os = "macos")]
-                return Ok(home.join("Library/Application Support/Google/Chrome"));
-                #[cfg(target_os = "linux")]
-                return Ok(home.join(".config/google-chrome"));
-                #[cfg(target_os = "windows")]
-                return Ok(home.join("AppData/Local/Google/Chrome/User Data"));
-            }
-            BrowserKind::Edge => {
-                #[cfg(target_os = "macos")]
-                return Ok(home.join("Library/Application Support/Microsoft Edge"));
-                #[cfg(target_os = "linux")]
-                return Ok(home.join(".config/microsoft-edge"));
-                #[cfg(target_os = "windows")]
-                return Ok(home.join("AppData/Local/Microsoft/Edge/User Data"));
-            }
-            BrowserKind::Brave => {
-                #[cfg(target_os = "macos")]
-                return Ok(home.join("Library/Application Support/BraveSoftware/Brave-Browser"));
-                #[cfg(target_os = "linux")]
-                return Ok(home.join(".config/BraveSoftware/Brave-Browser"));
-                #[cfg(target_os = "windows")]
-                return Ok(home.join("AppData/Local/BraveSoftware/Brave-Browser/User Data"));
-            }
-            BrowserKind::Vivaldi => {
-                #[cfg(target_os = "macos")]
-                return Ok(home.join("Library/Application Support/Vivaldi"));
-                #[cfg(target_os = "linux")]
-                return Ok(home.join(".config/vivaldi"));
-                #[cfg(target_os = "windows")]
-                return Ok(home.join("AppData/Local/Vivaldi/User Data"));
-            }
-            BrowserKind::Arc => {
-                #[cfg(target_os = "macos")]
-                return Ok(home.join("Library/Application Support/Arc"));
-                #[cfg(target_os = "linux")]
-                return Ok(home.join(".config/arc"));
-                #[cfg(target_os = "windows")]
-                return Ok(home.join("AppData/Local/Arc/User Data"));
-            }
-            BrowserKind::Helium => {
-                #[cfg(target_os = "macos")]
-                return Ok(home.join("Library/Application Support/net.imput.helium"));
-                #[cfg(target_os = "linux")]
-                return Ok(home.join(".config/helium"));
-                #[cfg(target_os = "windows")]
-                return Ok(home.join("AppData/Local/Helium/User Data"));
-            }
-            BrowserKind::Opera => {
-                #[cfg(target_os = "macos")]
-                return Ok(home.join("Library/Application Support/com.operasoftware.Opera"));
-                #[cfg(target_os = "linux")]
-                return Ok(home.join(".config/opera"));
-                #[cfg(target_os = "windows")]
-                return Ok(home.join("AppData/Roaming/Opera Software/Opera Stable/User Data"));
-            }
-            BrowserKind::Chromium => {
-                #[cfg(target_os = "macos")]
-                return Ok(home.join("Library/Application Support/Chromium"));
-                #[cfg(target_os = "linux")]
-                return Ok(home.join(".config/chromium"));
-                #[cfg(target_os = "windows")]
-                return Ok(home.join("AppData/Local/Chromium/User Data"));
-            }
-            _ => Err(ProfileError::UnsupportedBrowser(format!(
-                "Profile discovery not supported for {:?}",
-                browser_kind
-            ))),
+        #[cfg(target_os = "macos")]
+        {
+            let app_support = home.join("Library/Application Support");
+            let dir_name = match browser.kind {
+                BrowserKind::Chrome => match browser.channel {
+                    BrowserChannel::Chromium(ChromiumChannel::Stable) => "Google/Chrome",
+                    BrowserChannel::Chromium(ChromiumChannel::Beta) => "Google/Chrome Beta",
+                    BrowserChannel::Chromium(ChromiumChannel::Dev) => "Google/Chrome Dev",
+                    BrowserChannel::Chromium(ChromiumChannel::Canary) => "Google/Chrome Canary",
+                    _ => "Google/Chrome",
+                },
+                BrowserKind::Edge => match browser.channel {
+                    BrowserChannel::Chromium(ChromiumChannel::Stable) => "Microsoft Edge",
+                    BrowserChannel::Chromium(ChromiumChannel::Beta) => "Microsoft Edge Beta",
+                    BrowserChannel::Chromium(ChromiumChannel::Dev) => "Microsoft Edge Dev",
+                    BrowserChannel::Chromium(ChromiumChannel::Canary) => "Microsoft Edge Canary",
+                    _ => "Microsoft Edge",
+                },
+                BrowserKind::Brave => "BraveSoftware/Brave-Browser",
+                BrowserKind::Vivaldi => "Vivaldi",
+                BrowserKind::Arc => "Arc",
+                BrowserKind::Helium => "net.imput.helium",
+                BrowserKind::Opera => "com.operasoftware.Opera",
+                BrowserKind::Chromium => "Chromium",
+                _ => {
+                    return Err(ProfileError::UnsupportedBrowser(format!(
+                        "Profile discovery not supported for {:?}",
+                        browser.kind
+                    )))
+                }
+            };
+            Ok(app_support.join(dir_name))
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            let config = home.join(".config");
+            let dir_name = match browser.kind {
+                BrowserKind::Chrome => "google-chrome",
+                BrowserKind::Edge => "microsoft-edge",
+                BrowserKind::Brave => "BraveSoftware/Brave-Browser",
+                BrowserKind::Vivaldi => "vivaldi",
+                BrowserKind::Arc => "arc",
+                BrowserKind::Helium => "helium",
+                BrowserKind::Opera => "opera",
+                BrowserKind::Chromium => "chromium",
+                _ => {
+                    return Err(ProfileError::UnsupportedBrowser(format!(
+                        "Profile discovery not supported for {:?}",
+                        browser.kind
+                    )))
+                }
+            };
+            // On linux, channels often have suffixes like -beta, -unstable
+            let channel_suffix = match browser.channel {
+                BrowserChannel::Chromium(ChromiumChannel::Beta) => "-beta",
+                BrowserChannel::Chromium(ChromiumChannel::Dev) => "-unstable", // for chrome
+                _ => "",
+            };
+            Ok(config.join(format!("{}{}", dir_name, channel_suffix)))
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            let local_app_data = home.join("AppData").join("Local");
+            let roaming_app_data = home.join("AppData").join("Roaming");
+
+            let (mut base_path, components): (PathBuf, &'static [&'static str]) = match browser.kind
+            {
+                BrowserKind::Chrome => (
+                    local_app_data.clone(),
+                    match browser.channel {
+                        BrowserChannel::Chromium(ChromiumChannel::Stable) => {
+                            &["Google", "Chrome", "User Data"]
+                        }
+                        BrowserChannel::Chromium(ChromiumChannel::Beta) => {
+                            &["Google", "Chrome Beta", "User Data"]
+                        }
+                        BrowserChannel::Chromium(ChromiumChannel::Dev) => {
+                            &["Google", "Chrome Dev", "User Data"]
+                        }
+                        BrowserChannel::Chromium(ChromiumChannel::Canary) => {
+                            &["Google", "Chrome SxS", "User Data"]
+                        }
+                        _ => &["Google", "Chrome", "User Data"],
+                    },
+                ),
+                BrowserKind::Edge => (
+                    local_app_data.clone(),
+                    match browser.channel {
+                        BrowserChannel::Chromium(ChromiumChannel::Stable) => {
+                            &["Microsoft", "Edge", "User Data"]
+                        }
+                        BrowserChannel::Chromium(ChromiumChannel::Beta) => {
+                            &["Microsoft", "Edge Beta", "User Data"]
+                        }
+                        BrowserChannel::Chromium(ChromiumChannel::Dev) => {
+                            &["Microsoft", "Edge Dev", "User Data"]
+                        }
+                        BrowserChannel::Chromium(ChromiumChannel::Canary) => {
+                            &["Microsoft", "Edge SxS", "User Data"]
+                        }
+                        _ => &["Microsoft", "Edge", "User Data"],
+                    },
+                ),
+                BrowserKind::Brave => (
+                    local_app_data.clone(),
+                    &["BraveSoftware", "Brave-Browser", "User Data"],
+                ),
+                BrowserKind::Vivaldi => (local_app_data.clone(), &["Vivaldi", "User Data"]),
+                BrowserKind::Arc => (local_app_data.clone(), &["Arc", "User Data"]),
+                BrowserKind::Helium => (local_app_data.clone(), &["Helium", "User Data"]),
+                BrowserKind::Opera => (
+                    roaming_app_data.clone(),
+                    &["Opera Software", "Opera Stable"],
+                ), // Note: Opera stores data under Roaming
+                BrowserKind::Chromium => (local_app_data.clone(), &["Chromium", "User Data"]),
+                _ => {
+                    return Err(ProfileError::UnsupportedBrowser(format!(
+                        "Profile discovery not supported for {:?}",
+                        browser.kind
+                    )))
+                }
+            };
+
+            base_path.extend(components.iter().copied());
+            Ok(base_path)
+        }
+
+        #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+        {
+            Err(ProfileError::UnsupportedBrowser(
+                "Unsupported platform for profile discovery".to_string(),
+            ))
         }
     }
 
@@ -756,8 +827,8 @@ impl ProfileManager {
     /// // let dir = ProfileManager::get_default_browser_dir(BrowserKind::Safari).expect("expected Safari dir");
     /// // assert!(dir.to_string_lossy().contains("Library/Safari"));
     /// ```
-    fn get_default_browser_dir(browser_kind: BrowserKind) -> Result<PathBuf, ProfileError> {
-        match browser_kind {
+    pub fn get_default_browser_dir(browser: &BrowserInfo) -> Result<PathBuf, ProfileError> {
+        match browser.kind {
             // Chromium-based browsers
             BrowserKind::Chrome
             | BrowserKind::Edge
@@ -766,7 +837,7 @@ impl ProfileManager {
             | BrowserKind::Arc
             | BrowserKind::Helium
             | BrowserKind::Opera
-            | BrowserKind::Chromium => Self::get_chromium_base_dir(browser_kind),
+            | BrowserKind::Chromium => Self::get_chromium_base_dir(browser),
 
             // Firefox-based browsers
             BrowserKind::Firefox | BrowserKind::Waterfox => Self::get_firefox_base_dir(),
@@ -790,6 +861,37 @@ impl ProfileManager {
                 }
             }
 
+            // DuckDuckGo (macOS only)
+            BrowserKind::DuckDuckGo => {
+                #[cfg(target_os = "macos")]
+                {
+                    let home = dirs_next::home_dir().ok_or_else(|| {
+                        ProfileError::InvalidDirectory(
+                            "Could not determine home directory".to_string(),
+                        )
+                    })?;
+
+                    // Detect installation source on-demand to determine the correct profile path
+                    let source = detect_installation_source(browser);
+                    match source {
+                        InstallationSource::MacOs(MacOsInstallationSource::AppStore) => {
+                            // App Store DuckDuckGo uses sandboxed container path
+                            Ok(home.join("Library/Containers/com.duckduckgo.mobile.ios/Data/Library/Application Support"))
+                        }
+                        _ => {
+                            // System installation uses standard application support
+                            Ok(home.join("Library/Application Support/DuckDuckGo"))
+                        }
+                    }
+                }
+                #[cfg(not(target_os = "macos"))]
+                {
+                    Err(ProfileError::UnsupportedBrowser(
+                        "DuckDuckGo is only supported on macOS".to_string(),
+                    ))
+                }
+            }
+
             // Tor Browser - has its own directory structure
             BrowserKind::TorBrowser => {
                 let home = dirs_next::home_dir().ok_or_else(|| {
@@ -806,7 +908,7 @@ impl ProfileManager {
                 }
                 #[cfg(target_os = "windows")]
                 {
-                    Ok(home.join("AppData/Local/TorBrowser"))
+                    Ok(home.join("AppData").join("Local").join("TorBrowser"))
                 }
                 #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
                 {
@@ -1113,29 +1215,46 @@ pub fn validate_profile_options(
     let mut warnings = Vec::new();
 
     match browser.kind {
-        BrowserKind::Safari => {
+        BrowserKind::Safari | BrowserKind::DuckDuckGo => {
+            let browser_name = if browser.kind == BrowserKind::Safari {
+                "Safari"
+            } else {
+                "DuckDuckGo"
+            };
+
             match &profile_opts.profile_type {
                 ProfileType::Named(_) => {
-                    warnings.push("Safari does not support named profiles".to_string());
+                    warnings.push(format!("{} does not support named profiles", browser_name));
                 }
                 ProfileType::CustomDirectory(_) => {
-                    warnings
-                        .push("Safari does not support custom user data directories".to_string());
+                    warnings.push(format!(
+                        "{} does not support custom user data directories",
+                        browser_name
+                    ));
                 }
                 ProfileType::Temporary(_) => {
-                    warnings.push("Safari does not support temporary profiles".to_string());
+                    warnings.push(format!(
+                        "{} does not support temporary profiles",
+                        browser_name
+                    ));
                 }
                 ProfileType::Guest => {
-                    warnings.push("Safari does not support guest mode".to_string());
+                    warnings.push(format!("{} does not support guest mode", browser_name));
                 }
                 ProfileType::Default => {}
             }
 
             if window_opts.incognito {
-                warnings.push("Safari incognito mode requires manual activation (not supported via command line)".to_string());
+                warnings.push(format!(
+                    "{} incognito mode requires manual activation (not supported via command line)",
+                    browser_name
+                ));
             }
             if window_opts.kiosk {
-                warnings.push("Safari does not support kiosk mode via command line".to_string());
+                warnings.push(format!(
+                    "{} does not support kiosk mode via command line",
+                    browser_name
+                ));
             }
         }
 

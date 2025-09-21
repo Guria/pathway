@@ -1,10 +1,11 @@
 use clap::{Parser, ValueEnum};
+use pathway::browser::{default_channel_priority, BrowserChannel};
 use pathway::filesystem::RealFileSystem;
 use pathway::{
-    available_tokens, detect_inventory, find_browser, launch_with_profile, logging,
-    validate_profile_options, validate_url, BrowserChannel, BrowserInfo, BrowserInventory,
-    LaunchCommand, LaunchTarget, ProfileInfo, ProfileManager, ProfileOptions, ProfileType,
-    SystemDefaultBrowser, ValidatedUrl, ValidationStatus, WindowOptions,
+    detect_inventory, launch_with_profile, logging, validate_profile_options, validate_url,
+    BrowserInfo, BrowserInventory, LaunchCommand, LaunchTarget, ProfileInfo, ProfileManager,
+    ProfileOptions, ProfileType, SystemDefaultBrowser, ValidatedUrl, ValidationStatus,
+    WindowOptions,
 };
 use serde::Serialize;
 use std::path::PathBuf;
@@ -33,20 +34,24 @@ enum Commands {
         /// URLs to open
         urls: Vec<String>,
 
-        /// Browser to use (chrome, firefox, safari, etc.)
+        /// Browser to use (e.g. "chrome", "firefox-dev")
         #[arg(short, long)]
         browser: Option<String>,
 
-        /// Browser channel (stable, beta, dev, canary, nightly)
-        #[arg(long, value_enum)]
-        channel: Option<BrowserChannelArg>,
+        /// Browser channel (e.g. "stable", "beta", "dev")
+        #[arg(short = 'c', long, conflicts_with_all = ["system_default", "no_system_default"])]
+        channel: Option<String>,
+
+        /// Installation source (e.g. "system", "homebrew", "flatpak")
+        #[arg(short = 's', long)]
+        source: Option<String>,
 
         /// Use system default browser
-        #[arg(long, conflicts_with_all = ["browser", "channel"])]
+        #[arg(long, conflicts_with_all = ["browser", "source"])]
         system_default: bool,
 
         /// Force fallback browser when no --browser is provided (prevents infinite loops when launched from app bundle)
-        #[arg(long, conflicts_with_all = ["system_default", "browser", "channel"])]
+        #[arg(long, conflicts_with_all = ["system_default", "browser", "source"])]
         no_system_default: bool,
 
         /// Profile options (mutually exclusive)
@@ -70,13 +75,17 @@ enum Commands {
 
     /// Manage browser profiles
     Profile {
-        /// Browser to manage profiles for
+        /// Browser to manage profiles for (e.g. "chrome", "firefox-dev")
         #[arg(short, long)]
         browser: Option<String>,
 
-        /// Browser channel
-        #[arg(long, value_enum)]
-        channel: Option<BrowserChannelArg>,
+        /// Browser channel (e.g. "stable", "beta", "dev")
+        #[arg(short = 'c', long)]
+        channel: Option<String>,
+
+        /// Installation source (e.g. "system", "homebrew", "flatpak")
+        #[arg(short = 's', long)]
+        source: Option<String>,
 
         /// Custom user data directory to examine
         #[arg(long)]
@@ -93,11 +102,27 @@ enum BrowserAction {
     List,
     /// Check if a specific browser is available
     Check {
-        /// Browser name to check
+        /// Browser to check (e.g. "chrome", "firefox-dev")
+        #[arg(short, long)]
         browser: String,
-        /// Specific channel to check
-        #[arg(long, value_enum)]
-        channel: Option<BrowserChannelArg>,
+        /// Browser channel (e.g. "stable", "beta", "dev")
+        #[arg(short = 'c', long)]
+        channel: Option<String>,
+        /// Installation source (e.g. "system", "homebrew", "flatpak")
+        #[arg(short = 's', long)]
+        source: Option<String>,
+    },
+    /// Show detailed browser information including installation source
+    Info {
+        /// Browser to show info for (e.g. "chrome", "firefox-dev")
+        #[arg(short, long)]
+        browser: String,
+        /// Browser channel (e.g. "stable", "beta", "dev")
+        #[arg(short = 'c', long)]
+        channel: Option<String>,
+        /// Installation source (e.g. "system", "homebrew", "flatpak")
+        #[arg(short = 's', long)]
+        source: Option<String>,
     },
 }
 
@@ -151,27 +176,6 @@ struct WindowArgs {
 enum OutputFormat {
     Human,
     Json,
-}
-
-#[derive(Debug, Clone, Copy, ValueEnum)]
-enum BrowserChannelArg {
-    Stable,
-    Beta,
-    Dev,
-    Canary,
-    Nightly,
-}
-
-impl From<BrowserChannelArg> for BrowserChannel {
-    fn from(value: BrowserChannelArg) -> Self {
-        match value {
-            BrowserChannelArg::Stable => BrowserChannel::Stable,
-            BrowserChannelArg::Beta => BrowserChannel::Beta,
-            BrowserChannelArg::Dev => BrowserChannel::Dev,
-            BrowserChannelArg::Canary => BrowserChannel::Canary,
-            BrowserChannelArg::Nightly => BrowserChannel::Nightly,
-        }
-    }
 }
 
 #[derive(Debug, Serialize)]
@@ -269,13 +273,18 @@ struct ProfileErrorResponse {
 struct LaunchCommandParams {
     urls: Vec<String>,
     browser: Option<String>,
-    channel: Option<BrowserChannelArg>,
+    channel: Option<String>,
+    source: Option<String>,
     system_default: bool,
     no_system_default: bool,
     profile_args: ProfileArgs,
     window_args: WindowArgs,
     no_launch: bool,
     format: OutputFormat,
+}
+
+fn available_tokens(browsers: &[BrowserInfo]) -> Vec<String> {
+    browsers.iter().map(|browser| browser.alias()).collect()
 }
 
 /// Get a safe fallback browser when infinite loop prevention is needed.
@@ -293,7 +302,7 @@ fn get_fallback_browser(inventory: &BrowserInventory) -> Option<&BrowserInfo> {
 
     // Try each preferred browser in order
     for browser_name in fallback_preferences {
-        if let Some(browser) = find_browser(&inventory.browsers, browser_name, None) {
+        if let Some(browser) = select_browser(inventory, Some(browser_name), None, None, false) {
             return Some(browser);
         }
     }
@@ -339,6 +348,7 @@ fn main() {
             urls,
             browser,
             channel,
+            source,
             system_default,
             no_system_default,
             profile,
@@ -349,6 +359,7 @@ fn main() {
                 urls,
                 browser,
                 channel,
+                source,
                 system_default,
                 no_system_default,
                 profile_args: profile,
@@ -364,10 +375,19 @@ fn main() {
         Commands::Profile {
             browser,
             channel,
+            source,
             user_dir,
             action,
         } => {
-            handle_profile_command(&inventory, browser, channel, user_dir, action, args.format);
+            handle_profile_command(
+                &inventory,
+                browser,
+                channel,
+                source,
+                user_dir,
+                action,
+                args.format,
+            );
         }
     }
 }
@@ -456,25 +476,72 @@ fn validate_urls(urls: &[String], format: OutputFormat) -> (Vec<ValidatedUrl>, b
 ///
 /// ```no_run
 /// // Returns None because system default was requested
-/// let chosen = select_browser(&inventory, None, None, true);
+/// let chosen = select_browser(&inventory, None, None, None, true);
 /// assert!(chosen.is_none());
 ///
 /// // When a browser name is provided, the lookup result (Some or None) is returned
-/// let chosen = select_browser(&inventory, Some("firefox"), Some(BrowserChannel::Stable), false);
+/// let chosen = select_browser(&inventory, Some("firefox"), Some("stable"), None, false);
 /// ```
 fn select_browser<'a>(
     inventory: &'a BrowserInventory,
-    browser: Option<&str>,
-    channel: Option<BrowserChannel>,
+    browser_token: Option<&str>,
+    channel_token: Option<&str>,
+    source_token: Option<&str>,
     system_default: bool,
 ) -> Option<&'a BrowserInfo> {
     if system_default {
-        None
-    } else if let Some(name) = browser {
-        find_browser(&inventory.browsers, name, channel)
-    } else {
-        None
+        return None;
     }
+
+    // If no browser, channel, or source is specified, we don't select anything.
+    if browser_token.is_none() && channel_token.is_none() && source_token.is_none() {
+        return None;
+    }
+
+    let mut candidates: Vec<&BrowserInfo> = inventory.browsers.iter().collect();
+    let mut token_specified_channel = false;
+
+    if let Some(token) = browser_token {
+        let (kind_str, channel_str) = if let Some((k, c)) = token.rsplit_once('-') {
+            (k, Some(c))
+        } else {
+            (token, None)
+        };
+
+        // Filter by kind
+        candidates.retain(|b| b.kind.canonical_name() == kind_str);
+
+        // Filter by channel if present in token
+        if let Some(channel_str) = channel_str {
+            token_specified_channel = true;
+            candidates.retain(|b| b.channel.canonical_name() == channel_str);
+        }
+    }
+
+    // Additional channel filter from --channel flag
+    if let Some(channel) = channel_token {
+        candidates.retain(|b| b.channel.canonical_name() == channel);
+    }
+
+    // Filter by installation source if specified (using on-demand detection)
+    if let Some(source) = source_token {
+        use pathway::browser::sources::detect_installation_source;
+        candidates.retain(|b| detect_installation_source(b).canonical_name() == source);
+    }
+
+    if candidates.is_empty() {
+        return None;
+    }
+
+    if !token_specified_channel && channel_token.is_none() && candidates.len() > 1 {
+        candidates.sort_by(|a, b| {
+            default_channel_priority(&a.channel)
+                .cmp(&default_channel_priority(&b.channel))
+                .then_with(|| a.display_name.cmp(&b.display_name))
+        });
+    }
+
+    candidates.first().copied()
 }
 
 /// Validate profile/window CLI arguments and convert them to runtime options.
@@ -597,6 +664,7 @@ fn handle_launch_command(inventory: &BrowserInventory, params: LaunchCommandPara
         urls,
         browser,
         channel,
+        source,
         system_default,
         no_system_default,
         profile_args,
@@ -613,11 +681,11 @@ fn handle_launch_command(inventory: &BrowserInventory, params: LaunchCommandPara
         process::exit(1);
     }
 
-    let requested_channel = channel.map(Into::into);
     let mut selected_browser = select_browser(
         inventory,
         browser.as_deref(),
-        requested_channel,
+        channel.as_deref(),
+        source.as_deref(),
         system_default,
     );
 
@@ -641,7 +709,7 @@ fn handle_launch_command(inventory: &BrowserInventory, params: LaunchCommandPara
     let additional_warnings = generate_browser_warnings(
         &browser,
         selected_browser,
-        requested_channel,
+        None, // requested_channel
         inventory,
         format,
         is_fallback,
@@ -841,29 +909,10 @@ fn handle_browser_command(
                     eprintln!("  (none)");
                 } else {
                     for browser in &inventory.browsers {
-                        let path = browser
-                            .bundle_path
-                            .as_ref()
-                            .or(browser.executable.as_ref())
-                            .map(|p| p.display().to_string())
-                            .unwrap_or_else(|| "(unknown path)".to_string());
+                        let channel_name = browser.channel.canonical_name();
+                        let alias = browser.alias();
 
-                        if let Some(bundle_id) = &browser.bundle_id {
-                            eprintln!(
-                                "  {} ({}) - {} [{}]",
-                                browser.cli_name,
-                                browser.channel.canonical_name(),
-                                path,
-                                bundle_id
-                            );
-                        } else {
-                            eprintln!(
-                                "  {} ({}) - {}",
-                                browser.cli_name,
-                                browser.channel.canonical_name(),
-                                path
-                            );
-                        }
+                        eprintln!("{} ({}) - {}", alias, channel_name, browser.display_name);
                     }
                 }
                 eprintln!("System default: {}", inventory.system_default.display_name);
@@ -877,36 +926,149 @@ fn handle_browser_command(
                 println!("{}", serde_json::to_string_pretty(&response).unwrap());
             }
         },
-        BrowserAction::Check { browser, channel } => {
-            let requested_channel = channel.map(Into::into);
-            let result = find_browser(&inventory.browsers, &browser, requested_channel);
+        BrowserAction::Info {
+            browser,
+            channel,
+            source,
+        } => {
+            let result = select_browser(
+                inventory,
+                Some(&browser),
+                channel.as_deref(),
+                source.as_deref(),
+                false,
+            );
 
             match format {
                 OutputFormat::Human => {
                     if let Some(info) = result {
-                        let path = info
-                            .bundle_path
-                            .as_ref()
-                            .or(info.executable.as_ref())
-                            .map(|p| p.display().to_string())
-                            .unwrap_or_else(|| "(unknown path)".to_string());
+                        use pathway::browser::sources::detect_installation_source;
+                        let detected_source = detect_installation_source(info);
 
-                        if let Some(bundle_id) = &info.bundle_id {
-                            eprintln!(
-                                "Browser '{}' ({}) is available at {} [{}]",
-                                info.cli_name,
-                                info.channel.canonical_name(),
-                                path,
-                                bundle_id
-                            );
-                        } else {
-                            eprintln!(
-                                "Browser '{}' ({}) is available at {}",
-                                info.cli_name,
-                                info.channel.canonical_name(),
-                                path
-                            );
+                        let alias = info.alias();
+
+                        eprintln!("Browser '{}' information:", alias);
+                        eprintln!("  Display Name: {}", info.display_name);
+                        eprintln!("  Kind: {}", info.kind.canonical_name());
+                        eprintln!("  Channel: {}", info.channel.canonical_name());
+                        eprintln!(
+                            "  Installation Source: {}",
+                            detected_source.canonical_name()
+                        );
+                        eprintln!("  Executable: {}", info.executable_path.display());
+                        eprintln!("  Unique ID: {}", info.unique_id);
+
+                        // Show profile directory if applicable
+                        if let Ok(profile_dir) =
+                            pathway::profile::ProfileManager::get_default_browser_dir(info)
+                        {
+                            eprintln!("  Profile Directory: {}", profile_dir.display());
                         }
+                    } else {
+                        eprintln!(
+                            "Browser '{}' not found. Available browsers: {}",
+                            browser,
+                            available_tokens(&inventory.browsers).join(", ")
+                        );
+                        process::exit(1);
+                    }
+                }
+                OutputFormat::Json => {
+                    if let Some(info) = result {
+                        use pathway::browser::sources::detect_installation_source;
+                        let detected_source = detect_installation_source(info);
+
+                        #[derive(serde::Serialize)]
+                        struct InfoJsonResponse {
+                            action: &'static str,
+                            browser: String,
+                            available: bool,
+                            info: Option<BrowserInfoDetailed>,
+                        }
+
+                        #[derive(serde::Serialize)]
+                        struct BrowserInfoDetailed {
+                            kind: String,
+                            channel: String,
+                            installation_source: String,
+                            display_name: String,
+                            executable_path: String,
+                            unique_id: String,
+                            profile_directory: Option<String>,
+                        }
+
+                        let profile_dir =
+                            pathway::profile::ProfileManager::get_default_browser_dir(info)
+                                .ok()
+                                .map(|p| p.to_string_lossy().to_string());
+
+                        let detailed_info = BrowserInfoDetailed {
+                            kind: info.kind.canonical_name().to_string(),
+                            channel: info.channel.canonical_name().to_string(),
+                            installation_source: detected_source.canonical_name().to_string(),
+                            display_name: info.display_name.clone(),
+                            executable_path: info.executable_path.to_string_lossy().to_string(),
+                            unique_id: info.unique_id.clone(),
+                            profile_directory: profile_dir,
+                        };
+
+                        let response = InfoJsonResponse {
+                            action: "browser-info",
+                            browser: browser.to_string(),
+                            available: true,
+                            info: Some(detailed_info),
+                        };
+
+                        println!("{}", serde_json::to_string_pretty(&response).unwrap());
+                    } else {
+                        #[derive(serde::Serialize)]
+                        struct InfoNotFoundResponse {
+                            action: &'static str,
+                            browser: String,
+                            available: bool,
+                            info: Option<String>,
+                            message: String,
+                        }
+
+                        let response = InfoNotFoundResponse {
+                            action: "browser-info",
+                            browser: browser.to_string(),
+                            available: false,
+                            info: None,
+                            message: format!(
+                                "Browser '{}' not found. Available browsers: {}",
+                                browser,
+                                available_tokens(&inventory.browsers).join(", ")
+                            ),
+                        };
+
+                        println!("{}", serde_json::to_string_pretty(&response).unwrap());
+                        process::exit(1);
+                    }
+                }
+            }
+        }
+        BrowserAction::Check {
+            browser,
+            channel,
+            source,
+        } => {
+            let result = select_browser(
+                inventory,
+                Some(&browser),
+                channel.as_deref(),
+                source.as_deref(),
+                false,
+            );
+
+            match format {
+                OutputFormat::Human => {
+                    if let Some(info) = result {
+                        let alias = info.alias();
+                        eprintln!("Browser '{}' is available.", alias);
+                        eprintln!("  Display Name: {}", info.display_name);
+                        eprintln!("  Executable: {}", info.executable_path.display());
+                        eprintln!("  Unique ID: {}", info.unique_id);
                     } else {
                         eprintln!(
                             "Browser '{}' not found. Available browsers: {}",
@@ -920,7 +1082,7 @@ fn handle_browser_command(
                     let response = CheckJsonResponse {
                         action: "check-browser",
                         browser: browser.to_string(),
-                        channel: requested_channel,
+                        channel: None, // requested_channel,
                         available: result.is_some(),
                         resolved: result.cloned(),
                         message: if result.is_none() {
@@ -965,20 +1127,26 @@ fn handle_browser_command(
 ///
 /// ```rust,no_run
 /// // Resolve inventory earlier (not shown) and call:
-/// handle_profile_command(&inventory, Some("chrome".to_string()), None, None, ProfileAction::List, OutputFormat::Human);
+/// handle_profile_command(&inventory, Some("chrome".to_string()), None, None, None, ProfileAction::List, OutputFormat::Human);
 /// ```
 fn handle_profile_command(
     inventory: &BrowserInventory,
     browser: Option<String>,
-    channel: Option<BrowserChannelArg>,
+    channel: Option<String>,
+    source: Option<String>,
     user_dir: Option<PathBuf>,
     action: ProfileAction,
     format: OutputFormat,
 ) {
     let browser_name = browser.as_deref().unwrap_or("chrome");
-    let requested_channel = channel.map(Into::into);
 
-    let browser = match find_browser(&inventory.browsers, browser_name, requested_channel) {
+    let browser = match select_browser(
+        inventory,
+        Some(browser_name),
+        channel.as_deref(),
+        source.as_deref(),
+        false,
+    ) {
         Some(info) => info,
         None => {
             let error_msg = format!(
@@ -1209,15 +1377,14 @@ impl BrowserJson {
     /// println!("{}", json.name);
     /// ```
     fn from_browser(info: &BrowserInfo, is_default: bool) -> Self {
+        let channel_name = info.channel.canonical_name();
+        let alias = info.alias();
+
         BrowserJson {
-            name: info.cli_name.clone(),
-            channel: Some(info.channel.canonical_name().to_string()),
-            path: info
-                .bundle_path
-                .as_ref()
-                .or(info.executable.as_ref())
-                .map(|p| p.display().to_string()),
-            bundle_id: info.bundle_id.clone(),
+            name: alias,
+            channel: Some(channel_name.to_string()),
+            path: Some(info.executable_path.display().to_string()),
+            bundle_id: Some(info.unique_id.clone()),
             is_default,
         }
     }
@@ -1240,9 +1407,7 @@ impl BrowserJson {
     fn from_system_default(default: &SystemDefaultBrowser) -> Self {
         BrowserJson {
             name: default.display_name.clone(),
-            channel: default
-                .channel
-                .map(|channel| channel.canonical_name().to_string()),
+            channel: None, // System default doesn't have channel info in new architecture
             path: default.path.as_ref().map(|p| p.display().to_string()),
             bundle_id: None,
             is_default: true,
@@ -1537,5 +1702,154 @@ fn handle_no_launch_response(
             Some("Launch skipped (--no-launch)".to_string()),
         );
         println!("{}", serde_json::to_string_pretty(&response).unwrap());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[cfg(target_os = "macos")]
+    use pathway::browser::channels::SafariChannel;
+    use pathway::browser::channels::{BrowserChannel, ChromiumChannel, FirefoxChannel};
+    use pathway::BrowserKind;
+
+    fn make_inventory(mut browsers: Vec<BrowserInfo>) -> BrowserInventory {
+        let system_default = SystemDefaultBrowser {
+            identifier: "system-default".into(),
+            display_name: "System default".into(),
+            kind: None,
+            path: None,
+        };
+
+        browsers.sort_by(|a, b| a.display_name.cmp(&b.display_name));
+
+        BrowserInventory {
+            browsers,
+            system_default,
+        }
+    }
+
+    fn chromium_browser(display: &str, channel: ChromiumChannel) -> BrowserInfo {
+        BrowserInfo {
+            kind: BrowserKind::Chrome,
+            channel: BrowserChannel::Chromium(channel),
+            display_name: display.to_string(),
+            executable_path: PathBuf::from(format!("/fake/bin/{}", display.replace(' ', ""))),
+            version: Some("1.2.3".into()),
+            unique_id: format!("chrome-{}", channel.canonical_name()),
+        }
+    }
+
+    fn firefox_browser(display: &str, channel: FirefoxChannel) -> BrowserInfo {
+        BrowserInfo {
+            kind: BrowserKind::Firefox,
+            channel: BrowserChannel::Firefox(channel),
+            display_name: display.to_string(),
+            executable_path: PathBuf::from(format!("/fake/bin/{}", display.replace(' ', ""))),
+            version: Some("1.2.3".into()),
+            unique_id: format!("firefox-{}", channel.canonical_name()),
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn safari_browser(display: &str) -> BrowserInfo {
+        BrowserInfo {
+            kind: BrowserKind::Safari,
+            channel: BrowserChannel::Safari(SafariChannel::Stable),
+            display_name: display.to_string(),
+            executable_path: PathBuf::from("/Applications/Safari.app/Contents/MacOS/Safari"),
+            version: Some("17.0".into()),
+            unique_id: "com.apple.Safari".into(),
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    fn edge_browser(display: &str) -> BrowserInfo {
+        BrowserInfo {
+            kind: BrowserKind::Edge,
+            channel: BrowserChannel::Chromium(ChromiumChannel::Stable),
+            display_name: display.to_string(),
+            executable_path: PathBuf::from(format!(
+                "C:/Program Files/{}",
+                display.replace(' ', "")
+            )),
+            version: Some("1.2.3".into()),
+            unique_id: "edge-stable".into(),
+        }
+    }
+
+    #[test]
+    fn select_browser_prefers_stable_channel_by_default() {
+        let inventory = make_inventory(vec![
+            chromium_browser("Google Chrome Beta", ChromiumChannel::Beta),
+            chromium_browser("Google Chrome", ChromiumChannel::Stable),
+        ]);
+
+        let chosen = select_browser(&inventory, Some("chrome"), None, None, false)
+            .expect("expected browser selection");
+
+        assert_eq!(chosen.channel.canonical_name(), "stable");
+        assert_eq!(chosen.display_name, "Google Chrome");
+    }
+
+    #[test]
+    fn select_browser_respects_explicit_channel_request() {
+        let inventory = make_inventory(vec![
+            chromium_browser("Google Chrome", ChromiumChannel::Stable),
+            chromium_browser("Google Chrome Dev", ChromiumChannel::Dev),
+        ]);
+
+        let chosen = select_browser(&inventory, Some("chrome"), Some("dev"), None, false)
+            .expect("expected dev channel");
+
+        assert_eq!(chosen.channel.canonical_name(), "dev");
+        assert_eq!(chosen.display_name, "Google Chrome Dev");
+    }
+
+    #[test]
+    fn select_browser_honors_token_with_channel_suffix() {
+        let inventory = make_inventory(vec![
+            chromium_browser("Google Chrome", ChromiumChannel::Stable),
+            chromium_browser("Google Chrome Canary", ChromiumChannel::Canary),
+        ]);
+
+        let chosen = select_browser(&inventory, Some("chrome-canary"), None, None, false)
+            .expect("expected canary selection");
+
+        assert_eq!(chosen.channel.canonical_name(), "canary");
+        assert_eq!(chosen.display_name, "Google Chrome Canary");
+    }
+
+    #[test]
+    fn fallback_browser_prefers_platform_defaults() {
+        #[allow(unused_mut)]
+        let mut browsers = vec![
+            chromium_browser("Google Chrome", ChromiumChannel::Stable),
+            firefox_browser("Mozilla Firefox", FirefoxChannel::Stable),
+        ];
+
+        #[cfg(target_os = "macos")]
+        {
+            browsers.push(safari_browser("Safari"));
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            browsers.push(edge_browser("Microsoft Edge"));
+        }
+
+        let inventory = make_inventory(browsers);
+
+        if let Some(fallback) = get_fallback_browser(&inventory) {
+            if cfg!(target_os = "macos") {
+                assert_eq!(fallback.kind, BrowserKind::Safari);
+            } else if cfg!(target_os = "windows") {
+                assert_eq!(fallback.kind, BrowserKind::Edge);
+            } else {
+                assert_eq!(fallback.kind, BrowserKind::Chrome);
+            }
+        } else {
+            panic!("Expected fallback browser to be available");
+        }
     }
 }

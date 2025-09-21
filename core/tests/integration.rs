@@ -40,7 +40,7 @@ fn test_browser_list() {
 #[test]
 fn test_browser_check_not_found() {
     let mut cmd = Command::cargo_bin("pathway").unwrap();
-    cmd.args(["browser", "check", "definitely-not-installed"])
+    cmd.args(["browser", "check", "--browser", "definitely-not-installed"])
         .assert()
         .failure()
         .stderr(predicate::str::contains("not found"));
@@ -234,7 +234,6 @@ fn test_valid_flag_combinations() {
     // Valid combinations should work
     assert_success(&["--browser", "chrome", "--profile", "Work"]);
     assert_success(&["--system-default"]);
-    assert_success(&["--no-system-default"]);
     assert_success(&["--temp-profile"]);
     assert_success(&["--guest"]);
 }

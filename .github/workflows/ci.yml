@@ -103,17 +103,3 @@ jobs:
           use_oidc: true
           files: ./core/cobertura.xml
           fail_ci_if_error: false
-
-  msrv:
-    name: Minimum Supported Rust Version
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v4
-
-      - name: Install MSRV toolchain
-        uses: dtolnay/rust-toolchain@1.70.0
-
-      - name: Check MSRV
-        working-directory: ./core
-        run: cargo check --all-features

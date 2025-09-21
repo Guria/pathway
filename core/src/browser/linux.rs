@@ -1,14 +1,21 @@
-use super::{
-    BrowserChannel, BrowserInfo, BrowserKind, LaunchCommand, LaunchOutcome, LaunchTarget,
-    SystemDefaultBrowser,
-};
-use crate::filesystem::{FileSystem, RealFileSystem};
+use super::{BrowserInfo, BrowserKind};
+use crate::browser::channels::{BrowserChannel, ChromiumChannel, FirefoxChannel, OperaChannel};
+use crate::browser::sources::{InstallationSource, LinuxInstallationSource};
+use crate::filesystem::FileSystem;
+use std::collections::HashSet;
 use std::env;
-use std::io;
 use std::path::{Path, PathBuf};
+
+use super::{LaunchCommand, LaunchOutcome, LaunchTarget, SystemDefaultBrowser};
 use std::process::{Command, Stdio};
 use thiserror::Error;
 use tracing::debug;
+
+fn fs_is_file<F: FileSystem>(fs: &F, path: &Path) -> bool {
+    fs.metadata(path)
+        .map(|meta| meta.is_file())
+        .unwrap_or(false)
+}
 
 #[derive(Debug, Error)]
 pub enum LaunchError {
@@ -19,119 +26,13 @@ pub enum LaunchError {
     #[error("Failed to launch browser: {source}")]
     Spawn {
         #[from]
-        source: io::Error,
+        source: std::io::Error,
     },
 }
 
-pub fn detect_browsers<F: FileSystem>(fs: &F) -> Vec<BrowserInfo> {
-    let mut result = Vec::new();
-    let candidates = linux_candidates();
-
-    for candidate in candidates {
-        if let Some(info) = resolve_candidate(candidate, fs) {
-            result.push(info);
-        }
-    }
-
-    result
-}
-
-/// Determine the system default browser on Linux.
-///
-/// Queries the desktop environment's default web browser entry (via xdg-settings) and attempts to
-/// map that desktop entry to a known browser candidate. If a matching candidate is found this
-/// returns a `SystemDefaultBrowser` populated with the desktop entry identifier, the candidate's
-/// display name, kind and channel. If the candidate's executable can be resolved on the system,
-/// `path` will contain the executable path; otherwise `path` is `None`.
-///
-/// Returns `None` if the default desktop entry cannot be determined.
-///
-/// # Examples
-///
-/// ```no_run
-/// use pathway::detect_inventory;
-///
-/// let inventory = detect_inventory();
-/// let sys = &inventory.system_default;
-/// println!("Default browser: {} ({})", sys.display_name, sys.identifier);
-/// ```
-pub fn system_default_browser_with_fs<F: FileSystem>(fs: &F) -> Option<SystemDefaultBrowser> {
-    if let Some(entry) = query_default_desktop_entry() {
-        if let Some(candidate) = linux_candidates()
-            .iter()
-            .find(|candidate| candidate.desktop_entries.contains(&entry.as_str()))
-        {
-            if let Some(info) = resolve_candidate(candidate, fs) {
-                return Some(SystemDefaultBrowser {
-                    identifier: entry.clone(),
-                    display_name: candidate.display_name.to_string(),
-                    kind: Some(candidate.kind),
-                    channel: Some(candidate.channel),
-                    path: info.executable.clone(),
-                });
-            }
-
-            return Some(SystemDefaultBrowser {
-                identifier: entry,
-                display_name: candidate.display_name.to_string(),
-                kind: Some(candidate.kind),
-                channel: Some(candidate.channel),
-                path: None,
-            });
-        }
-
-        return Some(SystemDefaultBrowser {
-            identifier: entry,
-            display_name: "System default".to_string(),
-            kind: None,
-            channel: None,
-            path: None,
-        });
-    }
-
-    None
-}
-
-pub fn system_default_browser() -> Option<SystemDefaultBrowser> {
-    system_default_browser_with_fs(&RealFileSystem)
-}
-
-/// Launches the given URLs using the specified launch target.
-///
-/// This is a convenience wrapper around `launch_with_profile` that does not
-/// supply profile or window options.
-///
-/// # Examples
-///
-/// ```no_run
-/// use pathway::browser::{launch, LaunchTarget};
-///
-/// let urls = vec!["https://example.com".to_string()];
-/// // Launch using the system default browser
-/// let _ = launch(LaunchTarget::SystemDefault, &urls);
-/// ```
 pub fn launch(target: LaunchTarget<'_>, urls: &[String]) -> Result<LaunchOutcome, LaunchError> {
     launch_with_profile(target, urls, None, None)
 }
-
-/// Launches one or more URLs using either a specific browser or the system default, optionally applying profile and window options.
-///
-/// If `target` is `LaunchTarget::Browser`, this will resolve the browser executable and spawn it with the provided URLs. If both `profile_opts` and `window_opts` are supplied, profile-specific CLI arguments are generated and prepended to the browser command.
-/// If `target` is `LaunchTarget::SystemDefault`, each URL is opened via `xdg-open`.
-///
-/// Returns `Err(LaunchError::NoUrls)` when `urls` is empty. Returns `Err(LaunchError::MissingExecutable(...))` when the chosen browser has no resolvable executable. Spawn failures are returned as `LaunchError::Spawn { source }`.
-///
-/// # Examples
-///
-/// ```
-/// # use std::path::PathBuf;
-/// # use pathway::browser::LaunchTarget;
-/// # use pathway::browser::launch_with_profile;
-/// // Open two URLs with the system default browser
-/// let urls = vec!["https://example.com".to_string(), "https://rust-lang.org".to_string()];
-/// let outcome = launch_with_profile(LaunchTarget::SystemDefault, &urls, None, None);
-/// assert!(outcome.is_ok());
-/// ```
 pub fn launch_with_profile(
     target: LaunchTarget<'_>,
     urls: &[String],
@@ -172,6 +73,7 @@ pub fn launch_with_profile(
                 .get_args()
                 .map(|s| s.to_string_lossy().to_string())
                 .collect();
+
             let log_message = if has_profile_args {
                 "Launching browser with profile"
             } else {
@@ -194,439 +96,417 @@ pub fn launch_with_profile(
             })
         }
         LaunchTarget::SystemDefault => {
-            for url in urls {
-                let mut command = Command::new("xdg-open");
+            let mut command = Command::new("xdg-open");
+            command.args(urls);
+            command.stdin(Stdio::null());
+            command.stdout(Stdio::null());
+            command.stderr(Stdio::null());
 
-                if let Some(window_opts) = window_opts {
-                    if window_opts.new_window {
-                        // xdg-open doesn't support a new window flag, so we log this limitation
-                        debug!("new-window option requested but xdg-open has no new-window flag - option ignored");
-                    }
-                }
-
-                command.arg(url);
-                command.stdin(Stdio::null());
-                command.stdout(Stdio::null());
-                command.stderr(Stdio::null());
-                debug!(program = "xdg-open", url = %url, "Launching system default browser");
-                command.spawn()?;
-            }
+            let all_args: Vec<String> = command
+                .get_args()
+                .map(|s| s.to_string_lossy().to_string())
+                .collect();
+            debug!(program = "xdg-open", args = ?all_args, "Launching system default browser");
+            command.spawn()?;
 
             let cmd = LaunchCommand {
                 program: PathBuf::from("xdg-open"),
-                args: urls.to_vec(),
-                display: urls
-                    .iter()
-                    .map(|u| format!("xdg-open {}", u))
-                    .collect::<Vec<_>>()
-                    .join(" && "),
+                args: all_args.clone(),
+                display: format!("xdg-open {}", all_args.join(" ")),
                 is_system_default: true,
             };
 
             Ok(LaunchOutcome {
                 browser: None,
-                system_default: system_default_browser(),
+                system_default: system_default_browser_with_fs(&crate::filesystem::RealFileSystem),
                 command: cmd,
             })
         }
     }
 }
+pub fn system_default_browser_with_fs<F: FileSystem>(fs: &F) -> Option<SystemDefaultBrowser> {
+    let desktop_id = detect_default_desktop_entry(fs)?;
+    let desktop_path = resolve_desktop_entry_path(fs, &desktop_id)?;
+    let content = fs.read_to_string(&desktop_path).ok()?;
 
-struct LinuxBrowserCandidate {
-    kind: BrowserKind,
-    channel: BrowserChannel,
-    cli_name: &'static str,
-    display_name: &'static str,
-    binary_names: &'static [&'static str],
-    aliases: &'static [&'static str],
-    desktop_entries: &'static [&'static str],
+    if let Some(info) = create_browser_info(&desktop_path, &content) {
+        let path = info.launch_path().map(Path::to_path_buf);
+        return Some(SystemDefaultBrowser {
+            identifier: desktop_id,
+            display_name: info.display_name,
+            kind: Some(info.kind),
+            path,
+        });
+    }
+
+    let display_name = get_desktop_entry_value(&content, "Name")
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| {
+            desktop_path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("system-default")
+                .to_string()
+        });
+
+    Some(SystemDefaultBrowser {
+        identifier: desktop_id,
+        display_name,
+        kind: None,
+        path: Some(desktop_path),
+    })
 }
 
-fn linux_candidates() -> &'static [LinuxBrowserCandidate] {
-    const CANDIDATES: &[LinuxBrowserCandidate] = &[
-        LinuxBrowserCandidate {
-            kind: BrowserKind::Chrome,
-            channel: BrowserChannel::Stable,
-            cli_name: "chrome",
-            display_name: "Google Chrome",
-            binary_names: &["google-chrome", "chrome", "google-chrome-stable"],
-            aliases: &["google-chrome", "chrome-stable"],
-            desktop_entries: &[
-                "google-chrome.desktop",
-                "chrome.desktop",
-                "google-chrome-stable.desktop",
-            ],
-        },
-        LinuxBrowserCandidate {
-            kind: BrowserKind::Chrome,
-            channel: BrowserChannel::Beta,
-            cli_name: "chrome-beta",
-            display_name: "Google Chrome Beta",
-            binary_names: &["google-chrome-beta"],
-            aliases: &["chrome-beta"],
-            desktop_entries: &["google-chrome-beta.desktop"],
-        },
-        LinuxBrowserCandidate {
-            kind: BrowserKind::Chrome,
-            channel: BrowserChannel::Dev,
-            cli_name: "chrome-dev",
-            display_name: "Google Chrome Dev",
-            binary_names: &["google-chrome-dev"],
-            aliases: &["chrome-dev"],
-            desktop_entries: &["google-chrome-dev.desktop"],
-        },
-        LinuxBrowserCandidate {
-            kind: BrowserKind::Chrome,
-            channel: BrowserChannel::Canary,
-            cli_name: "chrome-canary",
-            display_name: "Google Chrome Canary",
-            binary_names: &["google-chrome-canary"],
-            aliases: &["chrome-canary"],
-            desktop_entries: &["google-chrome-canary.desktop"],
-        },
-        LinuxBrowserCandidate {
-            kind: BrowserKind::Firefox,
-            channel: BrowserChannel::Stable,
-            cli_name: "firefox",
-            display_name: "Firefox",
-            binary_names: &["firefox"],
-            aliases: &["mozilla-firefox"],
-            desktop_entries: &["firefox.desktop"],
-        },
-        LinuxBrowserCandidate {
-            kind: BrowserKind::Firefox,
-            channel: BrowserChannel::Dev,
-            cli_name: "firefox-developer",
-            display_name: "Firefox Developer Edition",
-            binary_names: &["firefox-developer-edition", "firefox-developer"],
-            aliases: &["firefox-dev"],
-            desktop_entries: &[
-                "firefoxdeveloperedition.desktop",
-                "firefox-developer-edition.desktop",
-            ],
-        },
-        LinuxBrowserCandidate {
-            kind: BrowserKind::Firefox,
-            channel: BrowserChannel::Nightly,
-            cli_name: "firefox-nightly",
-            display_name: "Firefox Nightly",
-            binary_names: &["firefox-nightly"],
-            aliases: &["firefox-night"],
-            desktop_entries: &["firefox-nightly.desktop"],
-        },
-        LinuxBrowserCandidate {
-            kind: BrowserKind::Edge,
-            channel: BrowserChannel::Stable,
-            cli_name: "edge",
-            display_name: "Microsoft Edge",
-            binary_names: &["microsoft-edge", "microsoft-edge-stable"],
-            aliases: &["edge-stable"],
-            desktop_entries: &["microsoft-edge.desktop", "microsoft-edge-stable.desktop"],
-        },
-        LinuxBrowserCandidate {
-            kind: BrowserKind::Edge,
-            channel: BrowserChannel::Beta,
-            cli_name: "edge-beta",
-            display_name: "Microsoft Edge Beta",
-            binary_names: &["microsoft-edge-beta"],
-            aliases: &["edge-beta"],
-            desktop_entries: &["microsoft-edge-beta.desktop"],
-        },
-        LinuxBrowserCandidate {
-            kind: BrowserKind::Edge,
-            channel: BrowserChannel::Dev,
-            cli_name: "edge-dev",
-            display_name: "Microsoft Edge Dev",
-            binary_names: &["microsoft-edge-dev"],
-            aliases: &["edge-dev"],
-            desktop_entries: &["microsoft-edge-dev.desktop"],
-        },
-        LinuxBrowserCandidate {
-            kind: BrowserKind::Edge,
-            channel: BrowserChannel::Canary,
-            cli_name: "edge-canary",
-            display_name: "Microsoft Edge Canary",
-            binary_names: &["microsoft-edge-canary"],
-            aliases: &["edge-canary"],
-            desktop_entries: &["microsoft-edge-canary.desktop"],
-        },
-        LinuxBrowserCandidate {
-            kind: BrowserKind::Brave,
-            channel: BrowserChannel::Stable,
-            cli_name: "brave",
-            display_name: "Brave Browser",
-            binary_names: &["brave", "brave-browser"],
-            aliases: &["brave-browser"],
-            desktop_entries: &["brave-browser.desktop"],
-        },
-        LinuxBrowserCandidate {
-            kind: BrowserKind::Brave,
-            channel: BrowserChannel::Beta,
-            cli_name: "brave-beta",
-            display_name: "Brave Browser Beta",
-            binary_names: &["brave-browser-beta"],
-            aliases: &["brave-beta"],
-            desktop_entries: &["brave-browser-beta.desktop"],
-        },
-        LinuxBrowserCandidate {
-            kind: BrowserKind::Brave,
-            channel: BrowserChannel::Dev,
-            cli_name: "brave-dev",
-            display_name: "Brave Browser Dev",
-            binary_names: &["brave-browser-dev"],
-            aliases: &["brave-dev"],
-            desktop_entries: &["brave-browser-dev.desktop"],
-        },
-        LinuxBrowserCandidate {
-            kind: BrowserKind::Brave,
-            channel: BrowserChannel::Nightly,
-            cli_name: "brave-nightly",
-            display_name: "Brave Browser Nightly",
-            binary_names: &["brave-browser-nightly"],
-            aliases: &["brave-nightly"],
-            desktop_entries: &["brave-browser-nightly.desktop"],
-        },
-        LinuxBrowserCandidate {
-            kind: BrowserKind::Arc,
-            channel: BrowserChannel::Stable,
-            cli_name: "arc",
-            display_name: "Arc",
-            binary_names: &["arc"],
-            aliases: &[],
-            desktop_entries: &["company.thebrowser.Arc.desktop"],
-        },
-        LinuxBrowserCandidate {
-            kind: BrowserKind::Vivaldi,
-            channel: BrowserChannel::Stable,
-            cli_name: "vivaldi",
-            display_name: "Vivaldi",
-            binary_names: &["vivaldi", "vivaldi-stable"],
-            aliases: &["vivaldi-browser"],
-            desktop_entries: &["vivaldi.desktop", "vivaldi-stable.desktop"],
-        },
-        LinuxBrowserCandidate {
-            kind: BrowserKind::Opera,
-            channel: BrowserChannel::Stable,
-            cli_name: "opera",
-            display_name: "Opera",
-            binary_names: &["opera"],
-            aliases: &["opera-browser"],
-            desktop_entries: &["opera.desktop"],
-        },
-        LinuxBrowserCandidate {
-            kind: BrowserKind::TorBrowser,
-            channel: BrowserChannel::Stable,
-            cli_name: "tor",
-            display_name: "Tor Browser",
-            binary_names: &["tor-browser", "tor-browser-en"],
-            aliases: &["tor-browser"],
-            desktop_entries: &["torbrowser.desktop", "tor-browser.desktop"],
-        },
-        LinuxBrowserCandidate {
-            kind: BrowserKind::Chromium,
-            channel: BrowserChannel::Stable,
-            cli_name: "chromium",
-            display_name: "Chromium",
-            binary_names: &["chromium", "chromium-browser"],
-            aliases: &["chromium-browser"],
-            desktop_entries: &["chromium.desktop", "chromium-browser.desktop"],
-        },
-        LinuxBrowserCandidate {
-            kind: BrowserKind::Waterfox,
-            channel: BrowserChannel::Stable,
-            cli_name: "waterfox",
-            display_name: "Waterfox",
-            binary_names: &["waterfox"],
-            aliases: &["waterfox-browser"],
-            desktop_entries: &["waterfox.desktop", "org.waterfoxproject.waterfox.desktop"],
-        },
-    ];
+pub fn detect_browsers<F: FileSystem>(fs: &F) -> Vec<BrowserInfo> {
+    let mut browsers = Vec::new();
+    let mut processed_files = HashSet::new();
 
-    CANDIDATES
-}
+    for dir in desktop_file_dirs() {
+        if !fs.is_dir(&dir) {
+            continue;
+        }
+        // fs::walk_dir is not available on the FileSystem trait, so we use std::fs here.
+        // The file reading itself will still use the trait for testability.
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|s| s.to_str()) == Some("desktop") {
+                    if let Ok(canonical_path) = fs.canonicalize(&path) {
+                        if processed_files.contains(&canonical_path) {
+                            continue;
+                        }
 
-fn resolve_candidate<F: FileSystem>(
-    candidate: &LinuxBrowserCandidate,
-    fs: &F,
-) -> Option<BrowserInfo> {
-    let search_dirs = linux_search_directories(fs);
-
-    for binary in candidate.binary_names {
-        let potential = locate_executable(binary, &search_dirs, fs);
-        if let Some(exec_path) = potential {
-            if !is_executable(&exec_path, fs) {
-                continue;
+                        if let Ok(content) = fs.read_to_string(&path) {
+                            if is_web_browser(&content) {
+                                if let Some(browser_info) = create_browser_info(&path, &content) {
+                                    browsers.push(browser_info);
+                                    processed_files.insert(canonical_path);
+                                }
+                            }
+                        }
+                    }
+                }
             }
+        }
+    }
 
-            return Some(BrowserInfo {
-                id: candidate.cli_name.to_string(),
-                cli_name: candidate.cli_name.to_string(),
-                display_name: candidate.display_name.to_string(),
-                kind: candidate.kind,
-                channel: candidate.channel,
-                aliases: candidate
-                    .aliases
-                    .iter()
-                    .map(|alias| alias.to_string())
-                    .collect(),
-                bundle_path: exec_path.parent().map(|p| p.to_path_buf()),
-                executable: Some(exec_path.clone()),
-                bundle_id: None,
-                version: None,
-                source: Some("linux".to_string()),
-            });
+    browsers
+}
+
+fn desktop_file_dirs() -> Vec<PathBuf> {
+    let mut dirs = vec![
+        PathBuf::from("/usr/share/applications"),
+        PathBuf::from("/var/lib/flatpak/exports/share/applications"),
+        PathBuf::from("/var/lib/snapd/desktop/applications"),
+    ];
+    if let Ok(home) = env::var("HOME") {
+        dirs.push(Path::new(&home).join(".local/share/applications"));
+        dirs.push(Path::new(&home).join(".local/share/flatpak/exports/share/applications"));
+    }
+    dirs
+}
+
+fn get_desktop_entry_value<'a>(content: &'a str, key: &str) -> Option<&'a str> {
+    content
+        .lines()
+        .find(|line| line.starts_with(key))
+        .and_then(|line| line.split_once('='))
+        .map(|(_, value)| value.trim())
+}
+
+fn is_web_browser(content: &str) -> bool {
+    if let Some(mime_type) = get_desktop_entry_value(content, "MimeType") {
+        return mime_type.split(';').any(|t| t == "x-scheme-handler/https");
+    }
+    false
+}
+
+fn create_browser_info(path: &Path, content: &str) -> Option<BrowserInfo> {
+    let (kind, channel) =
+        parse_desktop_file_name(path.to_str()?).or_else(|| infer_kind_from_entry(path, content))?;
+
+    let display_name = get_desktop_entry_value(content, "Name")
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| kind.canonical_name().to_string());
+
+    let executable_path = get_desktop_entry_value(content, "Exec").and_then(parse_exec_path)?;
+
+    let version = None; // Version detection is out of scope.
+
+    Some(BrowserInfo {
+        kind,
+        channel,
+        display_name,
+        executable_path,
+        version,
+        unique_id: path.to_str()?.to_string(),
+    })
+}
+
+fn parse_exec_path(exec: &str) -> Option<PathBuf> {
+    let path_str = exec.split(' ').next()?;
+    Some(PathBuf::from(path_str))
+}
+
+fn infer_source(path: &Path) -> InstallationSource {
+    let path_str = path.to_string_lossy();
+    if path_str.contains("/flatpak/") {
+        InstallationSource::Linux(LinuxInstallationSource::Flatpak)
+    } else if path_str.contains("/snap/") {
+        InstallationSource::Linux(LinuxInstallationSource::Snap)
+    } else {
+        InstallationSource::Linux(LinuxInstallationSource::System)
+    }
+}
+
+fn parse_desktop_file_name(path_str: &str) -> Option<(BrowserKind, BrowserChannel)> {
+    let file_name = Path::new(path_str).file_name()?.to_str()?.to_lowercase();
+    classify_browser_from_token(&file_name)
+}
+
+/// On-demand installation source detection for Linux browsers
+pub fn detect_source_for_browser(browser: &crate::browser::BrowserInfo) -> InstallationSource {
+    use std::path::Path;
+
+    // Re-use the existing infer_source logic with the unique_id (desktop file path)
+    let path = Path::new(&browser.unique_id);
+    infer_source(path)
+}
+
+fn infer_kind_from_entry(path: &Path, content: &str) -> Option<(BrowserKind, BrowserChannel)> {
+    let mut candidates = Vec::new();
+
+    if let Some(name) = get_desktop_entry_value(content, "Name") {
+        candidates.push(name.to_string());
+    }
+
+    if let Some(exec) = get_desktop_entry_value(content, "Exec") {
+        candidates.push(exec.to_string());
+        if let Some(exec_path) = parse_exec_path(exec) {
+            if let Some(file_name) = exec_path.file_name().and_then(|s| s.to_str()) {
+                candidates.push(file_name.to_string());
+            }
+        }
+    }
+
+    if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+        candidates.push(stem.to_string());
+    }
+
+    for candidate in candidates {
+        if let Some(result) = classify_browser_from_token(&candidate.to_ascii_lowercase()) {
+            return Some(result);
         }
     }
 
     None
 }
 
-fn linux_search_directories<F: FileSystem>(fs: &F) -> Vec<PathBuf> {
-    let mut dirs = vec![
-        PathBuf::from("/usr/bin"),
-        PathBuf::from("/usr/local/bin"),
-        PathBuf::from("/snap/bin"),
-        PathBuf::from("/opt"),
-    ];
-
-    if let Ok(home) = env::var("HOME") {
-        dirs.push(Path::new(&home).join(".local/bin"));
-        dirs.push(Path::new(&home).join("bin"));
+fn classify_browser_from_token(token: &str) -> Option<(BrowserKind, BrowserChannel)> {
+    if token.contains("google-chrome") || token.contains("chrome") {
+        let channel = if token.contains("canary") {
+            ChromiumChannel::Canary
+        } else if token.contains("beta") {
+            ChromiumChannel::Beta
+        } else if token.contains("dev") {
+            ChromiumChannel::Dev
+        } else {
+            ChromiumChannel::Stable
+        };
+        return Some((BrowserKind::Chrome, BrowserChannel::Chromium(channel)));
     }
 
-    dirs.extend(flatpak_bin_dirs(fs));
+    if token.contains("chromium") {
+        return Some((BrowserKind::Chromium, BrowserChannel::Single));
+    }
 
-    dirs
+    if token.contains("firefox") {
+        let channel = if token.contains("developeredition") || token.contains("developer") {
+            FirefoxChannel::Dev
+        } else if token.contains("nightly") {
+            FirefoxChannel::Nightly
+        } else if token.contains("esr") {
+            FirefoxChannel::Esr
+        } else {
+            FirefoxChannel::Stable
+        };
+        return Some((BrowserKind::Firefox, BrowserChannel::Firefox(channel)));
+    }
+
+    if token.contains("edge") || token.contains("microsoft-edge") {
+        let channel = if token.contains("beta") {
+            ChromiumChannel::Beta
+        } else if token.contains("dev") {
+            ChromiumChannel::Dev
+        } else if token.contains("canary") {
+            ChromiumChannel::Canary
+        } else {
+            ChromiumChannel::Stable
+        };
+        return Some((BrowserKind::Edge, BrowserChannel::Chromium(channel)));
+    }
+
+    if token.contains("brave") {
+        let channel = if token.contains("beta") {
+            ChromiumChannel::Beta
+        } else if token.contains("nightly") {
+            ChromiumChannel::Dev
+        } else {
+            ChromiumChannel::Stable
+        };
+        return Some((BrowserKind::Brave, BrowserChannel::Chromium(channel)));
+    }
+
+    if token.contains("opera") {
+        let channel = if token.contains("gx") {
+            OperaChannel::Gx
+        } else if token.contains("beta") {
+            OperaChannel::Beta
+        } else {
+            OperaChannel::Stable
+        };
+        return Some((BrowserKind::Opera, BrowserChannel::Opera(channel)));
+    }
+
+    if token.contains("vivaldi") {
+        return Some((BrowserKind::Vivaldi, BrowserChannel::Single));
+    }
+
+    if token.contains("tor") {
+        return Some((BrowserKind::TorBrowser, BrowserChannel::Single));
+    }
+
+    if token.contains("waterfox") {
+        return Some((BrowserKind::Waterfox, BrowserChannel::Single));
+    }
+
+    if token.contains("duckduckgo") {
+        return Some((BrowserKind::DuckDuckGo, BrowserChannel::Single));
+    }
+
+    if token.contains("zen") || token.contains("arc") {
+        return Some((BrowserKind::Arc, BrowserChannel::Single));
+    }
+
+    None
 }
 
-fn flatpak_bin_dirs<F: FileSystem>(fs: &F) -> Vec<PathBuf> {
-    let mut dirs = vec![PathBuf::from("/var/lib/flatpak/exports/bin")];
-    if let Ok(home) = env::var("HOME") {
-        dirs.push(Path::new(&home).join(".local/share/flatpak/exports/bin"));
+fn detect_default_desktop_entry<F: FileSystem>(fs: &F) -> Option<String> {
+    for path in candidate_mimeapps_files() {
+        if !fs_is_file(fs, &path) {
+            continue;
+        }
+
+        if let Ok(content) = fs.read_to_string(&path) {
+            if let Some(entry) = parse_mimeapps_default(&content) {
+                return Some(entry);
+            }
+        }
     }
 
-    // Only add paths that actually exist
-    dirs.into_iter().filter(|path| fs.exists(path)).collect()
+    None
 }
 
-fn locate_executable<F: FileSystem>(binary: &str, dirs: &[PathBuf], fs: &F) -> Option<PathBuf> {
-    let candidate_path = Path::new(binary);
-    if candidate_path.is_absolute() && fs.exists(candidate_path) {
-        return Some(candidate_path.to_path_buf());
+fn candidate_mimeapps_files() -> Vec<PathBuf> {
+    let mut files = Vec::new();
+
+    if let Some(config_home) = xdg_config_home() {
+        files.push(config_home.join("mimeapps.list"));
+        files.push(config_home.join("xdg-desktop-portal/mimeapps.list"));
     }
 
-    for dir in dirs {
-        let path = dir.join(binary);
-        if fs.exists(&path) {
+    if let Some(data_home) = xdg_data_home() {
+        files.push(data_home.join("applications/mimeapps.list"));
+    }
+
+    files.push(PathBuf::from("/usr/local/share/applications/mimeapps.list"));
+    files.push(PathBuf::from("/usr/share/applications/mimeapps.list"));
+    files
+}
+
+fn xdg_config_home() -> Option<PathBuf> {
+    if let Ok(path) = env::var("XDG_CONFIG_HOME") {
+        if !path.is_empty() {
+            return Some(PathBuf::from(path));
+        }
+    }
+
+    env::var("HOME")
+        .ok()
+        .map(|home| Path::new(&home).join(".config"))
+}
+
+fn xdg_data_home() -> Option<PathBuf> {
+    if let Ok(path) = env::var("XDG_DATA_HOME") {
+        if !path.is_empty() {
+            return Some(PathBuf::from(path));
+        }
+    }
+
+    env::var("HOME")
+        .ok()
+        .map(|home| Path::new(&home).join(".local/share"))
+}
+
+fn parse_mimeapps_default(content: &str) -> Option<String> {
+    let mut in_section = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+
+        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+            in_section = trimmed.eq_ignore_ascii_case("[Default Applications]");
+            continue;
+        }
+
+        if !in_section {
+            continue;
+        }
+
+        let Some((key, value)) = trimmed.split_once('=') else {
+            continue;
+        };
+
+        if key != "x-scheme-handler/https" && key != "x-scheme-handler/http" {
+            continue;
+        }
+
+        for entry in value.split(';') {
+            let candidate = entry.trim();
+            if !candidate.is_empty() {
+                return Some(candidate.to_string());
+            }
+        }
+    }
+
+    None
+}
+
+fn resolve_desktop_entry_path<F: FileSystem>(fs: &F, desktop_id: &str) -> Option<PathBuf> {
+    let mut tried = HashSet::new();
+
+    let with_extension = if desktop_id.ends_with(".desktop") {
+        desktop_id.to_string()
+    } else {
+        format!("{}.desktop", desktop_id)
+    };
+
+    // If the ID is already an absolute path, trust it directly.
+    let candidate = PathBuf::from(&with_extension);
+    if candidate.is_absolute() && fs_is_file(fs, &candidate) {
+        return Some(candidate);
+    }
+
+    for dir in desktop_file_dirs() {
+        let path = dir.join(&with_extension);
+        if tried.insert(path.clone()) && fs_is_file(fs, &path) {
             return Some(path);
         }
     }
 
     None
-}
-
-#[cfg(target_family = "unix")]
-fn is_executable<F: FileSystem>(path: &Path, fs: &F) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-    if let Ok(metadata) = fs.metadata(path) {
-        let permissions = metadata.permissions();
-        permissions.mode() & 0o111 != 0
-    } else {
-        false
-    }
-}
-
-#[cfg(not(target_family = "unix"))]
-fn is_executable<F: FileSystem>(path: &Path, fs: &F) -> bool {
-    fs.exists(path)
-}
-
-fn query_default_desktop_entry() -> Option<String> {
-    let output = Command::new("xdg-settings")
-        .arg("get")
-        .arg("default-web-browser")
-        .output()
-        .ok()?;
-
-    if !output.status.success() {
-        return None;
-    }
-
-    let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if value.is_empty() {
-        None
-    } else {
-        Some(value)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::filesystem::MockFileSystem;
-    use std::os::unix::fs::PermissionsExt;
-    use std::path::PathBuf;
-    use tempfile::NamedTempFile;
-
-    #[test]
-    fn test_browser_detection_with_mock_fs() {
-        // Create a temporary executable file to get proper metadata
-        let temp_file = NamedTempFile::new().expect("Failed to create temporary file");
-
-        // Set executable permissions on the temp file
-        let mut perms = temp_file.as_file().metadata().unwrap().permissions();
-        perms.set_mode(0o755); // rwxr-xr-x
-        temp_file.as_file().set_permissions(perms).unwrap();
-
-        let mut mock_fs = MockFileSystem::new();
-
-        // Mock that only Chrome exists and is executable
-        mock_fs
-            .expect_exists()
-            .returning(|path| path == Path::new("/usr/bin/google-chrome"));
-
-        // Mock executable permissions check for Chrome using fresh metadata from temp file
-        mock_fs
-            .expect_metadata()
-            .with(mockall::predicate::eq(Path::new("/usr/bin/google-chrome")))
-            .returning(move |_| {
-                // Return fresh metadata from the temp file each time
-                temp_file.as_file().metadata().map_err(|_| {
-                    std::io::Error::new(std::io::ErrorKind::NotFound, "mock metadata error")
-                })
-            });
-
-        let browsers = detect_browsers(&mock_fs);
-
-        // With our mock, we should detect Chrome
-        assert!(browsers.iter().any(|b| b.kind == BrowserKind::Chrome));
-    }
-
-    #[test]
-    fn test_browser_detection_no_browsers() {
-        let mut mock_fs = MockFileSystem::new();
-
-        // Mock that no browser executables exist
-        mock_fs.expect_exists().returning(|_| false);
-
-        let browsers = detect_browsers(&mock_fs);
-
-        // Should find no browsers
-        assert!(browsers.is_empty());
-    }
-
-    #[test]
-    fn test_locate_executable_mock() {
-        let mut mock_fs = MockFileSystem::new();
-
-        mock_fs
-            .expect_exists()
-            .with(mockall::predicate::eq(Path::new("/usr/bin/chrome")))
-            .return_const(true);
-
-        let dirs = vec![PathBuf::from("/usr/bin")];
-        let result = locate_executable("chrome", &dirs, &mock_fs);
-
-        assert_eq!(result, Some(PathBuf::from("/usr/bin/chrome")));
-    }
 }

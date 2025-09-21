@@ -25,3 +25,10 @@ assert_cmd = "2.0"
 predicates = "3.1"
 tempfile = "3.8"
 mockall = "0.13"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = "0.10"
+core-services = "1.0"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+winreg = "0.55"
